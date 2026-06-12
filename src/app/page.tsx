@@ -151,7 +151,7 @@ export default function Home() {
   // Admin inputs
   const [adminResults, setAdminResults] = useState<{ [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } }>({});
   const [adminSaving, setAdminSaving] = useState<{ [matchId: string]: boolean }>({});
-  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions" | "groups">("results");
+  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions" | "groups" | "users">("results");
   const [adminSelectedUserId, setAdminSelectedUserId] = useState<string>("");
   const [adminUserPredictions, setAdminUserPredictions] = useState<{ [matchId: string]: Prediction }>({});
   const [adminUserDrafts, setAdminUserDrafts] = useState<{ [matchId: string]: { goals1: string; goals2: string } }>({});
@@ -328,6 +328,7 @@ export default function Home() {
       const groupCode = params.get("group");
       if (groupCode) {
         setInviteGroupCode(groupCode);
+        setIsRegistering(true);
       }
     }
   }, []);
@@ -705,6 +706,34 @@ export default function Home() {
     }
   };
 
+  const handleForceDeleteUser = async (userId: string) => {
+    if (!profile?.isAdmin) return;
+    const targetUser = leaderboard.find(u => u.uid === userId);
+    if (!targetUser) return;
+    
+    if (!window.confirm(`¿Estás absolutamente seguro de eliminar al usuario "${targetUser.displayName}" (${targetUser.email})? Se borrarán sus puntos y todas sus predicciones permanentemente. (El usuario no podrá ingresar ni figurar en la polla).`)) return;
+    
+    try {
+      const batch = writeBatch(db);
+      // Delete user document in users collection
+      batch.delete(doc(db, "users", userId));
+      
+      // Fetch and delete predictions of this user
+      const predsSnap = await getDocs(collection(db, "predictions"));
+      predsSnap.forEach((doc) => {
+        if (doc.data().userId === userId) {
+          batch.delete(doc.ref);
+        }
+      });
+      
+      await batch.commit();
+      alert(`Usuario "${targetUser.displayName}" eliminado exitosamente.`);
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      alert("Error al eliminar el usuario.");
+    }
+  };
+
   // Compute financial metrics dynamically in real-time
   const financialStats = React.useMemo(() => {
     const sortedMatches = [...matches].sort((a, b) => a.num - b.num);
@@ -804,6 +833,14 @@ export default function Home() {
               {isRegistering ? "Regístrate para pronosticar los 104 partidos" : "Inicia sesión para ver tu puntaje y pronósticos"}
             </p>
           </div>
+
+          {inviteGroup && (
+            <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center text-xs text-emerald-400">
+              👋 Te han invitado a unirte al grupo: <strong>{inviteGroup.name}</strong>.
+              <br />
+              <span className="text-slate-400 mt-1 block">Regístrate o inicia sesión abajo para unirte.</span>
+            </div>
+          )}
 
           {savedAccounts.length > 0 && !isRegistering && (
             <div className="mb-6 border-b border-slate-800/60 pb-5">
@@ -1167,16 +1204,15 @@ export default function Home() {
                                   <span className="text-xs bg-slate-950 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-lg">
                                     {match.result?.isFinal === false ? "En Vivo: " : "Final: "}{match.result?.goals1} - {match.result?.goals2}
                                   </span>
-                                  <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
-                                    (pred?.points ?? 0) === 5
+                                  <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 5
                                       ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                                       : (pred?.points ?? 0) === 3
-                                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                                      : (pred?.points ?? 0) === 2
-                                      ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                                      : (pred?.points ?? 0) === 1
-                                      ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                                      : "bg-slate-800 text-slate-500 border border-transparent"
+                                        ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                        : (pred?.points ?? 0) === 2
+                                          ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                                          : (pred?.points ?? 0) === 1
+                                            ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                                            : "bg-slate-800 text-slate-500 border border-transparent"
                                     }`}>
                                     +{pred?.points ?? 0} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                   </span>
@@ -1216,137 +1252,137 @@ export default function Home() {
 
               {activeTab === "leaderboard" && (
                 <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-950/60 pb-4">
-                      <div>
-                        <h2 className="text-xl font-extrabold text-slate-200">Tabla de Clasificación</h2>
-                        <p className="text-slate-400 text-xs mt-1">Conoce a los mejores pronosticadores de la copa</p>
-                      </div>
-
-                      {/* Group Selector Dropdown */}
-                      <div className="flex items-center space-x-2 shrink-0">
-                        <span className="text-xs font-semibold text-slate-400">Grupo:</span>
-                        <select
-                          value={selectedGroupId}
-                          onChange={(e) => setSelectedGroupId(e.target.value)}
-                          className="px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-350 text-xs font-semibold rounded-xl focus:outline-none focus:border-emerald-500 cursor-pointer"
-                        >
-                          <option value="global">🏆 Global</option>
-                          {groups
-                            .filter((g) => profile?.isAdmin || profile?.groupIds?.includes(g.id))
-                            .map((g) => (
-                              <option key={g.id} value={g.id}>👥 {g.name}</option>
-                            ))
-                          }
-                        </select>
-                      </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-950/60 pb-4">
+                    <div>
+                      <h2 className="text-xl font-extrabold text-slate-200">Tabla de Clasificación</h2>
+                      <p className="text-slate-400 text-xs mt-1">Conoce a los mejores pronosticadores de la copa</p>
                     </div>
 
-                    {selectedGroupId !== "global" && (
-                      (() => {
-                        const selGroup = groups.find(g => g.id === selectedGroupId);
-                        if (!selGroup) return null;
-                        const inviteUrl = typeof window !== "undefined" 
-                          ? `${window.location.origin}/?group=${selGroup.code}` 
-                          : `/?group=${selGroup.code}`;
-                        return (
-                          <div className="mt-4 bg-blue-500/5 border border-blue-500/20 text-blue-400 text-xs px-4 py-3 rounded-xl flex items-center justify-between gap-4">
-                            <span className="truncate">🔗 <strong>Enlace de invitación:</strong> <span className="underline select-all text-blue-300">{inviteUrl}</span></span>
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(inviteUrl);
-                                alert("Enlace de invitación copiado al portapapeles");
-                              }}
-                              className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-lg text-[10px] font-bold uppercase transition-all shrink-0 active:scale-95"
+                    {/* Group Selector Dropdown */}
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <span className="text-xs font-semibold text-slate-400">Grupo:</span>
+                      <select
+                        value={selectedGroupId}
+                        onChange={(e) => setSelectedGroupId(e.target.value)}
+                        className="px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-350 text-xs font-semibold rounded-xl focus:outline-none focus:border-emerald-500 cursor-pointer"
+                      >
+                        <option value="global">🏆 Global</option>
+                        {groups
+                          .filter((g) => profile?.isAdmin || profile?.groupIds?.includes(g.id))
+                          .map((g) => (
+                            <option key={g.id} value={g.id}>👥 {g.name}</option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                  </div>
+
+                  {selectedGroupId !== "global" && (
+                    (() => {
+                      const selGroup = groups.find(g => g.id === selectedGroupId);
+                      if (!selGroup) return null;
+                      const inviteUrl = typeof window !== "undefined"
+                        ? `${window.location.origin}${window.location.pathname}?group=${selGroup.code}`
+                        : `/?group=${selGroup.code}`;
+                      return (
+                        <div className="mt-4 bg-blue-500/5 border border-blue-500/20 text-blue-400 text-xs px-4 py-3 rounded-xl flex items-center justify-between gap-4">
+                          <span className="truncate">🔗 <strong>Enlace de invitación:</strong> <span className="underline select-all text-blue-300">{inviteUrl}</span></span>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(inviteUrl);
+                              alert("Enlace de invitación copiado al portapapeles");
+                            }}
+                            className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-lg text-[10px] font-bold uppercase transition-all shrink-0 active:scale-95"
+                          >
+                            Copiar
+                          </button>
+                        </div>
+                      );
+                    })()
+                  )}
+
+                  <div className="mt-4 bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-xs px-4 py-3 rounded-xl flex items-center space-x-2">
+                    <span>🏆 <strong>Premios de la Polla:</strong> Al final del torneo, el pozo total recaudado se repartirá así: 1er Puesto: <strong>60%</strong> • 2do Puesto: <strong>30%</strong> • 3er Puesto: <strong>10%</strong>.</span>
+                  </div>
+
+                  <div className="mt-6 overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
+                    <table className="w-full text-left border-collapse min-w-[300px]">
+                      <thead>
+                        <tr className="bg-slate-900/60 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+                          <th className="py-3 sm:py-4 px-3 sm:px-6 text-center w-16">Pos</th>
+                          <th className="py-3 sm:py-4 px-3 sm:px-6">Jugador</th>
+                          <th className="py-3 sm:py-4 px-3 sm:px-6 text-right w-24">Puntos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-950">
+                        {displayedLeaderboard.map((userProf, index) => {
+                          const isMe = userProf.uid === user.uid;
+                          return (
+                            <tr
+                              key={userProf.uid}
+                              className={`text-sm hover:bg-slate-900/20 transition-colors ${isMe ? "bg-emerald-500/5 text-emerald-400 font-bold" : "text-slate-300"
+                                }`}
                             >
-                              Copiar
-                            </button>
-                          </div>
-                        );
-                      })()
-                    )}
+                              <td className="py-3 sm:py-4 px-3 sm:px-6 text-center font-extrabold">
+                                {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
+                              </td>
+                              <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[150px] sm:max-w-[200px]">
+                                {userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}
+                              </td>
+                              <td className="py-3 sm:py-4 px-3 sm:px-6 text-right font-extrabold text-emerald-400">
+                                {userProf.points}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
 
-                    <div className="mt-4 bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-xs px-4 py-3 rounded-xl flex items-center space-x-2">
-                      <span>🏆 <strong>Premios de la Polla:</strong> Al final del torneo, el pozo total recaudado se repartirá así: 1er Puesto: <strong>60%</strong> • 2do Puesto: <strong>30%</strong> • 3er Puesto: <strong>10%</strong>.</span>
-                    </div>
+                  {/* Scoring System Information */}
+                  <div className="mt-8 pt-6 border-t border-slate-800/60">
+                    <h3 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
+                      <span>🎯</span>
+                      <span>Sistema de Puntuación</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-1">Cómo se calculan los puntos de cada partido:</p>
 
-                    <div className="mt-6 overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
-                      <table className="w-full text-left border-collapse min-w-[300px]">
-                        <thead>
-                          <tr className="bg-slate-900/60 text-slate-400 text-xs font-semibold uppercase tracking-wider">
-                            <th className="py-3 sm:py-4 px-3 sm:px-6 text-center w-16">Pos</th>
-                            <th className="py-3 sm:py-4 px-3 sm:px-6">Jugador</th>
-                            <th className="py-3 sm:py-4 px-3 sm:px-6 text-right w-24">Puntos</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-950">
-                          {displayedLeaderboard.map((userProf, index) => {
-                            const isMe = userProf.uid === user.uid;
-                            return (
-                              <tr
-                                key={userProf.uid}
-                                className={`text-sm hover:bg-slate-900/20 transition-colors ${isMe ? "bg-emerald-500/5 text-emerald-400 font-bold" : "text-slate-300"
-                                  }`}
-                              >
-                                <td className="py-3 sm:py-4 px-3 sm:px-6 text-center font-extrabold">
-                                  {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
-                                </td>
-                                <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[150px] sm:max-w-[200px]">
-                                  {userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}
-                                </td>
-                                <td className="py-3 sm:py-4 px-3 sm:px-6 text-right font-extrabold text-emerald-400">
-                                  {userProf.points}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Scoring System Information */}
-                    <div className="mt-8 pt-6 border-t border-slate-800/60">
-                      <h3 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
-                        <span>🎯</span>
-                        <span>Sistema de Puntuación</span>
-                      </h3>
-                      <p className="text-[11px] text-slate-400 mt-1">Cómo se calculan los puntos de cada partido:</p>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
-                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">+5 Pts</span>
-                          <div>
-                            <h4 className="text-xs font-bold text-slate-350">Marcador Exacto</h4>
-                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar el marcador numérico exacto.</p>
-                            <span className="text-[10px] text-emerald-500/80 block mt-1">E.g., Pred: 2-1 | Real: 2-1</span>
-                          </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                      <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">+5 Pts</span>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-350">Marcador Exacto</h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Acertar el marcador numérico exacto.</p>
+                          <span className="text-[10px] text-emerald-500/80 block mt-1">E.g., Pred: 2-1 | Real: 2-1</span>
                         </div>
+                      </div>
 
-                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
-                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">+3 Pts</span>
-                          <div>
-                            <h4 className="text-xs font-bold text-slate-350">Resultado y Diferencia</h4>
-                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar ganador/empate y la diferencia de goles.</p>
-                            <span className="text-[10px] text-amber-500/80 block mt-1">E.g., Pred: 3-1 | Real: 2-0</span>
-                          </div>
+                      <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">+3 Pts</span>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-350">Resultado y Diferencia</h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Acertar ganador/empate y la diferencia de goles.</p>
+                          <span className="text-[10px] text-amber-500/80 block mt-1">E.g., Pred: 3-1 | Real: 2-0</span>
                         </div>
+                      </div>
 
-                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
-                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">+2 Pts</span>
-                          <div>
-                            <h4 className="text-xs font-bold text-slate-350">Solo Resultado</h4>
-                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar ganador o empate con diferencia distinta.</p>
-                            <span className="text-[10px] text-blue-500/80 block mt-1">E.g., Pred: 2-1 | Real: 3-0</span>
-                          </div>
+                      <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">+2 Pts</span>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-350">Solo Resultado</h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Acertar ganador o empate con diferencia distinta.</p>
+                          <span className="text-[10px] text-blue-500/80 block mt-1">E.g., Pred: 2-1 | Real: 3-0</span>
                         </div>
+                      </div>
 
-                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
-                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">+1 Pt</span>
-                          <div>
-                            <h4 className="text-xs font-bold text-slate-350">Marcador Parcial</h4>
-                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar solo la cantidad de goles de un equipo.</p>
-                            <span className="text-[10px] text-indigo-500/80 block mt-1">E.g., Pred: 1-2 | Real: 1-0</span>
-                          </div>
+                      <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">+1 Pt</span>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-350">Marcador Parcial</h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Acertar solo la cantidad de goles de un equipo.</p>
+                          <span className="text-[10px] text-indigo-500/80 block mt-1">E.g., Pred: 1-2 | Real: 1-0</span>
                         </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1361,8 +1397,8 @@ export default function Home() {
                       <div>
                         <h2 className="text-xl font-extrabold text-amber-400">Panel de Administración</h2>
                         <p className="text-slate-400 text-xs mt-1">
-                          {profile?.isAdmin 
-                            ? "Controla los resultados reales del mundial, ajusta las predicciones de los participantes o gestiona grupos." 
+                          {profile?.isAdmin
+                            ? "Controla los resultados reales del mundial, ajusta las predicciones de los participantes o gestiona grupos."
                             : "Administra la membresía y parámetros de tus grupos asignados."
                           }
                         </p>
@@ -1399,6 +1435,15 @@ export default function Home() {
                               }`}
                           >
                             👤 Pronósticos de Jugadores
+                          </button>
+                          <button
+                            onClick={() => setAdminSubTab("users")}
+                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "users"
+                              ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                              : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
+                              }`}
+                          >
+                            🛡️ Gestionar Usuarios
                           </button>
                         </>
                       )}
@@ -1623,7 +1668,7 @@ export default function Home() {
                                       )}
                                     </h3>
                                     <div className="flex items-center space-x-2 mt-1">
-                                       <span className="text-[10px] text-slate-500">{formatMatchDateTimeLocal(match)} • {match.ground}</span>
+                                      <span className="text-[10px] text-slate-500">{formatMatchDateTimeLocal(match)} • {match.ground}</span>
                                       {hasResult && (
                                         <span className="text-[10px] bg-slate-950 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
                                           Resultado real: {match.result?.goals1} - {match.result?.goals2}
@@ -1670,16 +1715,15 @@ export default function Home() {
 
                                     {/* Points Indicator if match has result */}
                                     {hasResult && pred && (
-                                      <span className={`text-xs font-bold px-2 py-1.5 rounded-lg border ${
-                                        pred.points === 5
+                                      <span className={`text-xs font-bold px-2 py-1.5 rounded-lg border ${pred.points === 5
                                           ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                           : pred.points === 3
-                                          ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                          : pred.points === 2
-                                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                          : pred.points === 1
-                                          ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
-                                          : "bg-slate-800 text-slate-500 border-transparent"
+                                            ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                            : pred.points === 2
+                                              ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                              : pred.points === 1
+                                                ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                                                : "bg-slate-800 text-slate-500 border-transparent"
                                         }`}>
                                         +{pred.points} Pts
                                       </span>
@@ -1709,21 +1753,19 @@ export default function Home() {
                         <div className="flex space-x-2">
                           <button
                             onClick={() => setAdminGroupSubTab("list")}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                              adminGroupSubTab === "list"
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${adminGroupSubTab === "list"
                                 ? "bg-amber-500 text-slate-950"
                                 : "bg-slate-950 text-slate-400 hover:text-slate-200"
-                            }`}
+                              }`}
                           >
                             Listado de Grupos
                           </button>
                           <button
                             onClick={() => setAdminGroupSubTab("create")}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                              adminGroupSubTab === "create"
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${adminGroupSubTab === "create"
                                 ? "bg-amber-500 text-slate-950"
                                 : "bg-slate-950 text-slate-400 hover:text-slate-200"
-                            }`}
+                              }`}
                           >
                             + Crear Nuevo Grupo
                           </button>
@@ -1795,6 +1837,18 @@ export default function Home() {
                                           <td className="py-3 px-3 text-slate-500 truncate max-w-[120px]">{g.createdBy === "admin" ? "Admin" : g.createdBy}</td>
                                           <td className="py-3 px-3 text-right space-x-2">
                                             <button
+                                              onClick={() => {
+                                                const inviteUrl = typeof window !== "undefined"
+                                                  ? `${window.location.origin}${window.location.pathname}?group=${g.code}`
+                                                  : `/?group=${g.code}`;
+                                                navigator.clipboard.writeText(inviteUrl);
+                                                alert(`Enlace de invitación para el grupo "${g.name}" copiado.`);
+                                              }}
+                                              className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-bold text-blue-400"
+                                            >
+                                              Copiar Enlace
+                                            </button>
+                                            <button
                                               onClick={() => setAdminSelectedGroupId(adminSelectedGroupId === g.id ? "" : g.id)}
                                               className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg hover:border-slate-700 text-[10px] font-bold text-slate-350"
                                             >
@@ -1857,7 +1911,7 @@ export default function Home() {
                                       </button>
                                     </div>
                                   </div>
-                                  
+
                                   {groupMembers.length === 0 ? (
                                     <p className="text-slate-500 text-xs">Este grupo no tiene miembros asignados.</p>
                                   ) : (
@@ -1911,6 +1965,47 @@ export default function Home() {
                           )}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {adminSubTab === "users" && profile?.isAdmin && (
+                    <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
+                      <h3 className="font-extrabold text-slate-200 text-sm">Gestionar Usuarios Registrados</h3>
+                      <p className="text-slate-500 text-xs">Lista completa de participantes en la plataforma. Elimina usuarios no autorizados para quitarlos de la polla y del ranking.</p>
+                      
+                      <div className="overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
+                        <table className="w-full text-left border-collapse min-w-[400px]">
+                          <thead>
+                            <tr className="bg-slate-900/60 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+                              <th className="py-3 px-4">Jugador</th>
+                              <th className="py-3 px-4">Correo</th>
+                              <th className="py-3 px-4 text-center">Puntos</th>
+                              <th className="py-3 px-4 text-right">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-950 text-slate-350 text-xs">
+                            {leaderboard.map((u) => {
+                              const isMe = u.uid === user?.uid;
+                              return (
+                                <tr key={u.uid} className="hover:bg-slate-900/20">
+                                  <td className="py-3 px-4 font-bold">{u.displayName} {isMe && "(Tú)"}</td>
+                                  <td className="py-3 px-4 text-slate-450">{u.email}</td>
+                                  <td className="py-3 px-4 text-center font-extrabold text-emerald-400">{u.points}</td>
+                                  <td className="py-3 px-4 text-right">
+                                    <button
+                                      onClick={() => handleForceDeleteUser(u.uid)}
+                                      disabled={isMe}
+                                      className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400 uppercase tracking-wide disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                                    >
+                                      Eliminar
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>

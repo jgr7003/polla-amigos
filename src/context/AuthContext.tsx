@@ -66,15 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (userDocSnap.exists()) {
           setProfile(userDocSnap.data() as UserProfile);
         } else {
-          // Create fallback profile if it doesn't exist
-          const newProfile: UserProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || "",
-            displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Usuario",
-            points: 0,
-          };
-          await setDoc(userDocRef, newProfile);
-          setProfile(newProfile);
+          // If the profile does not exist (e.g. deleted by admin), sign out
+          await signOut(auth);
+          setProfile(null);
+          alert("Esta cuenta ha sido desactivada o eliminada por el administrador.");
         }
       } else {
         setProfile(null);
