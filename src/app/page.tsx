@@ -154,7 +154,7 @@ export default function Home() {
   // Admin inputs
   const [adminResults, setAdminResults] = useState<{ [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } }>({});
   const [adminSaving, setAdminSaving] = useState<{ [matchId: string]: boolean }>({});
-  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions" | "groups">("results");
+  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions" | "groups" | "users">("results");
   const [adminSelectedUserId, setAdminSelectedUserId] = useState<string>("");
   const [adminUserPredictions, setAdminUserPredictions] = useState<{ [matchId: string]: Prediction }>({});
   const [adminUserDrafts, setAdminUserDrafts] = useState<{ [matchId: string]: { goals1: string; goals2: string } }>({});
@@ -714,6 +714,33 @@ export default function Home() {
     } catch (err) {
       console.error("Error demoting from group admin:", err);
       alert("Error al remover de los administradores del grupo.");
+    }
+  };
+  const handleForceDeleteUser = async (userId: string) => {
+    if (!profile?.isAdmin) return;
+    const targetUser = leaderboard.find(u => u.uid === userId);
+    if (!targetUser) return;
+    
+    if (!window.confirm(`¿Estás absolutamente seguro de eliminar al usuario "${targetUser.displayName}" (${targetUser.email})? Se borrarán sus puntos y todas sus predicciones permanentemente. (El usuario no podrá ingresar ni figurar en la polla).`)) return;
+    
+    try {
+      const batch = writeBatch(db);
+      // Delete user document in users collection
+      batch.delete(doc(db, "users", userId));
+      
+      // Fetch and delete predictions of this user
+      const predsSnap = await getDocs(collection(db, "predictions"));
+      predsSnap.forEach((doc) => {
+        if (doc.data().userId === userId) {
+          batch.delete(doc.ref);
+        }
+      });
+      
+      await batch.commit();
+      alert(`Usuario "${targetUser.displayName}" eliminado exitosamente.`);
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      alert("Error al eliminar el usuario.");
     }
   };
 
@@ -1390,12 +1417,12 @@ export default function Home() {
                     </div>
 
                     {/* Sub-Tabs Navigation */}
-                    <div className="flex space-x-2 mt-4 border-t border-slate-900 pt-4">
+                    <div className="flex gap-2 mt-4 border-t border-slate-900 pt-4 overflow-x-auto flex-nowrap pb-2 pr-4 scrollbar-none snap-x snap-mandatory">
                       {profile?.isAdmin && (
                         <>
                           <button
                             onClick={() => setAdminSubTab("results")}
-                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "results"
+                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border shrink-0 snap-start ${adminSubTab === "results"
                               ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
                               : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
                               }`}
@@ -1404,24 +1431,35 @@ export default function Home() {
                           </button>
                           <button
                             onClick={() => setAdminSubTab("predictions")}
-                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "predictions"
+                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border shrink-0 snap-start ${adminSubTab === "predictions"
                               ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
                               : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
                               }`}
                           >
                             👤 Pronósticos de Jugadores
                           </button>
+                          <button
+                            onClick={() => setAdminSubTab("users")}
+                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border shrink-0 snap-start ${adminSubTab === "users"
+                              ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                              : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
+                              }`}
+                          >
+                            🛡️ Gestionar Usuarios
+                          </button>
                         </>
                       )}
                       <button
                         onClick={() => setAdminSubTab("groups")}
-                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "groups"
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border shrink-0 snap-start ${adminSubTab === "groups"
                           ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
                           : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
                           }`}
                       >
                         👥 Administrar Grupos
                       </button>
+                      {/* Spacer for horizontal mobile scrolling */}
+                      <div className="w-4 shrink-0" />
                     </div>
                   </div>
 
@@ -1931,6 +1969,47 @@ export default function Home() {
                           )}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {adminSubTab === "users" && profile?.isAdmin && (
+                    <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
+                      <h3 className="font-extrabold text-slate-200 text-sm">Gestionar Usuarios Registrados</h3>
+                      <p className="text-slate-500 text-xs">Lista completa de participantes en la plataforma. Elimina usuarios no autorizados para quitarlos de la polla y del ranking.</p>
+                      
+                      <div className="overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
+                        <table className="w-full text-left border-collapse min-w-[400px]">
+                          <thead>
+                            <tr className="bg-slate-900/60 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+                              <th className="py-3 px-4">Jugador</th>
+                              <th className="py-3 px-4">Correo</th>
+                              <th className="py-3 px-4 text-center">Puntos</th>
+                              <th className="py-3 px-4 text-right">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-950 text-slate-350 text-xs">
+                            {leaderboard.map((u) => {
+                              const isMe = u.uid === user?.uid;
+                              return (
+                                <tr key={u.uid} className="hover:bg-slate-900/20">
+                                  <td className="py-3 px-4 font-bold">{u.displayName} {isMe && "(Tú)"}</td>
+                                  <td className="py-3 px-4 text-slate-450">{u.email}</td>
+                                  <td className="py-3 px-4 text-center font-extrabold text-emerald-400">{u.points}</td>
+                                  <td className="py-3 px-4 text-right">
+                                    <button
+                                      onClick={() => handleForceDeleteUser(u.uid)}
+                                      disabled={isMe}
+                                      className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400 uppercase tracking-wide disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                                    >
+                                      Eliminar
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>
