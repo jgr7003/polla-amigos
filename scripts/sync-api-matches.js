@@ -8,11 +8,6 @@ if (!serviceAccountJson) {
   process.exit(1);
 }
 
-const apiFootballKey = process.env.API_FOOTBALL_KEY;
-if (!apiFootballKey) {
-  console.error("Error: API_FOOTBALL_KEY environment variable is not defined.");
-  process.exit(1);
-}
 
 let app;
 try {
@@ -56,28 +51,19 @@ function cleanName(name) {
 async function run() {
   console.log("Starting API scores sync...");
 
-  // 2. Fetch matches from API-Football
-  // League ID 1 is FIFA World Cup, season 2026
-  const apiUrl = "https://v3.football.api-sports.io/fixtures?league=1&season=2026";
+// 2. Fetch matches from worldcup26.ir API
+  const apiUrl = "https://worldcup26.ir/get/games";
   const apiResponse = await fetch(apiUrl, {
-    method: "GET",
-    headers: {
-      "x-rapidapi-key": apiFootballKey,
-      "x-rapidapi-host": "v3.football.api-sports.io"
-    }
+    method: "GET"
   });
 
   if (!apiResponse.ok) {
-    throw new Error(`API-Football request failed with status: ${apiResponse.status}`);
+    throw new Error(`WorldCup2026 API request failed with status: ${apiResponse.status}`);
   }
 
   const apiData = await apiResponse.json();
-  if (apiData.errors && Object.keys(apiData.errors).length > 0) {
-    throw new Error(`API-Football error: ${JSON.stringify(apiData.errors)}`);
-  }
-
-  const apiFixtures = apiData.response || [];
-  console.log(`Fetched ${apiFixtures.length} fixtures from API-Football.`);
+  const apiFixtures = apiData.games || [];
+  console.log(`Fetched ${apiFixtures.length} fixtures from WorldCup2026 API.`);
 
   // 3. Fetch current matches from Firestore
   const matchesSnap = await db.collection("matches").get();
@@ -90,10 +76,10 @@ async function run() {
 
   // 4. Match and update scores
   for (const dbMatch of dbMatches) {
-    // Find matching fixture in API by team names
+    // Find matching fixture in API by English team names
     const fixture = apiFixtures.find(f => {
-      const apiHome = f.teams.home.name;
-      const apiAway = f.teams.away.name;
+      const apiHome = f.home_team_name_en;
+      const apiAway = f.away_team_name_en;
       return (
         (cleanName(apiHome) === cleanName(dbMatch.team1) && cleanName(apiAway) === cleanName(dbMatch.team2)) ||
         (cleanName(apiHome) === cleanName(dbMatch.team2) && cleanName(apiAway) === cleanName(dbMatch.team1))
@@ -102,28 +88,29 @@ async function run() {
 
     if (!fixture) continue;
 
-    const statusShort = fixture.fixture.status.short;
-    const goalsHome = fixture.goals.home;
-    const goalsAway = fixture.goals.away;
+    // In worldcup26.ir API:
+    // finished is "TRUE" or "FALSE"
+    // time_elapsed is "finished", "notstarted", or live indicators like "1st-half", etc.
+    const isFinished = fixture.finished === "TRUE";
+    const isStarted = fixture.time_elapsed !== "notstarted";
 
-    // Check if goals are defined
-    if (goalsHome !== null && goalsAway !== null) {
-      const isFinal = ["FT", "AET", "PEN"].includes(statusShort);
-      const isLive = ["1H", "2H", "HT", "ET", "P", "LIVE"].includes(statusShort);
+    if (isStarted || isFinished) {
+      const goalsHome = parseInt(fixture.home_score, 10);
+      const goalsAway = parseInt(fixture.away_score, 10);
 
-      if (isFinal || isLive) {
-        // Determine goals mapping in case home/away teams are reversed in API
+      if (!isNaN(goalsHome) && !isNaN(goalsAway)) {
+        // Determine goals mapping in case home/away teams are reversed in API compared to dbMatch
         let realGoals1 = goalsHome;
         let realGoals2 = goalsAway;
 
-        if (cleanName(fixture.teams.home.name) === cleanName(dbMatch.team2)) {
+        if (cleanName(fixture.home_team_name_en) === cleanName(dbMatch.team2)) {
           // Teams are reversed
           realGoals1 = goalsAway;
           realGoals2 = goalsHome;
         }
 
         const currentResult = dbMatch.result;
-        const newResult = { goals1: realGoals1, goals2: realGoals2, isFinal };
+        const newResult = { goals1: realGoals1, goals2: realGoals2, isFinal: isFinished };
 
         // Check if result changed
         const hasChanged = !currentResult || 
