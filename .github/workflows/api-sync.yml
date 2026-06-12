@@ -2,7 +2,7 @@ name: Sync Matches and Recalculate Scores
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # Executes every 30 minutes
+    - cron: '*/10 * * * *' # Executes every 10 minutes
   workflow_dispatch: # Allows manual trigger from GitHub Actions tab
 
 jobs:
