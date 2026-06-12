@@ -1,4 +1,5 @@
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
 // 1. Initialize Firebase Admin SDK
 const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -13,17 +14,18 @@ if (!apiFootballKey) {
   process.exit(1);
 }
 
+let app;
 try {
   const serviceAccount = JSON.parse(serviceAccountJson);
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+  app = initializeApp({
+    credential: cert(serviceAccount)
   });
 } catch (err) {
   console.error("Error initializing Firebase Admin SDK (invalid JSON):", err);
   process.exit(1);
 }
 
-const db = admin.firestore();
+const db = getFirestore();
 
 // Points calculator logic
 function calculatePoints(predGoals1, predGoals2, realGoals1, realGoals2) {
