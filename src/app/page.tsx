@@ -803,9 +803,21 @@ export default function Home() {
   // Unique list of rounds for filtering
   const rounds = ["Todos", "Matchday 1", "Matchday 2", "Matchday 3", "Matchday 4", "Matchday 5", "Matchday 6", "Matchday 7", "Matchday 8", "Matchday 9", "Matchday 10", "Matchday 11", "Matchday 12", "Matchday 13", "Matchday 14", "Matchday 15", "Matchday 16", "Matchday 17", "Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Match for third place", "Final"];
 
+  // Sort matches chronologically
+  const sortedMatches = React.useMemo(() => {
+    return [...matches].sort((a, b) => {
+      const dateA = getMatchStartDate(a).getTime();
+      const dateB = getMatchStartDate(b).getTime();
+      if (dateA !== dateB) {
+        return dateA - dateB;
+      }
+      return a.num - b.num;
+    });
+  }, [matches]);
+
   const filteredMatches = selectedRound === "Todos"
-    ? matches
-    : matches.filter(m => m.round === selectedRound);
+    ? sortedMatches
+    : sortedMatches.filter(m => m.round === selectedRound);
 
   if (loading) {
     return (
