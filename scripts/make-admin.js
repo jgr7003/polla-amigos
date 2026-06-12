@@ -2,9 +2,9 @@ const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, query, where, getDocs, doc, updateDoc } = require('firebase/firestore');
 
 const firebaseConfig = {
-  projectId: "polla-futbolera-2026-sb",
-  appId: "1:1013044061661:web:eaa1639e15fb46bccf0234",
-  apiKey: "AIzaSyC07i9gn4HRw8IjIrDJoN504-OZp2SPsTI",
+  projectId: "polla-amigos-2026-sb",
+  appId: "1:315457424089:web:c46aecfb416412ec98ccc8",
+  apiKey: "AIzaSyCCFy6fLQxany27tLD9KhlHhpTjDycg_2g",
 };
 
 const app = initializeApp(firebaseConfig);

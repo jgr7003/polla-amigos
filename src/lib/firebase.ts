@@ -3,12 +3,12 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  projectId: "polla-futbolera-2026-sb",
-  appId: "1:1013044061661:web:eaa1639e15fb46bccf0234",
-  storageBucket: "polla-futbolera-2026-sb.firebasestorage.app",
-  apiKey: "AIzaSyC07i9gn4HRw8IjIrDJoN504-OZp2SPsTI",
-  authDomain: "polla-futbolera-2026-sb.firebaseapp.com",
-  messagingSenderId: "1013044061661",
+  projectId: "polla-amigos-2026-sb",
+  appId: "1:315457424089:web:c46aecfb416412ec98ccc8",
+  storageBucket: "polla-amigos-2026-sb.firebasestorage.app",
+  apiKey: "AIzaSyCCFy6fLQxany27tLD9KhlHhpTjDycg_2g",
+  authDomain: "polla-amigos-2026-sb.firebaseapp.com",
+  messagingSenderId: "315457424089",
 };
 
 // Initialize Firebase for SSR compatibility
