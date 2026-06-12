@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Polla Mundial 2026 • Güiza, Ardila, Franco y otros jajaja",
-  description: "Pronósticos de la Polla Futbolera para las familias Güiza, Ardila, Franco y otros jajaja.",
+  title: "Polla Mundial 2026 • amigos",
+  description: "Pronósticos de la Polla Futbolera para amigos",
 };
 
 export default function RootLayout({
