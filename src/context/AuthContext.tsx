@@ -47,6 +47,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
 
   useEffect(() => {
+    // Timeout check: if loading is still true after 8 seconds, force sign out and let user log in manually
+    const forceTimeout = setTimeout(async () => {
+      if (loading) {
+        console.warn("Loading state got stuck. Clearing session...");
+        try {
+          await signOut(auth);
+        } catch (e) {
+          console.error("Error signing out during stuck loading:", e);
+        }
+        setProfile(null);
+        setUser(null);
+        setLoading(false);
+      }
+    }, 8000);
+
+    return () => clearTimeout(forceTimeout);
+  }, [loading]);
+
+  useEffect(() => {
     // Cargar cuentas guardadas desde localStorage
     try {
       const stored = localStorage.getItem("polla_saved_accounts");
