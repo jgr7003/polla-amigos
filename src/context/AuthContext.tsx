@@ -17,6 +17,7 @@ interface UserProfile {
   displayName: string;
   points: number;
   isAdmin?: boolean;
+  groupIds?: string[];
 }
 
 export interface SavedAccount {

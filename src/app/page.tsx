@@ -10,7 +10,8 @@ import {
   doc,
   setDoc,
   getDocs,
-  writeBatch
+  writeBatch,
+  deleteDoc
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { calculatePoints } from "@/lib/scoreCalculator";
@@ -45,6 +46,16 @@ interface UserProfile {
   displayName: string;
   points: number;
   isAdmin?: boolean;
+  groupIds?: string[];
+}
+
+interface Group {
+  id: string;
+  name: string;
+  code: string;
+  createdAt: any;
+  createdBy: string;
+  admins?: string[];
 }
 
 function getMatchStartDate(match: Match): Date {
@@ -140,12 +151,25 @@ export default function Home() {
   // Admin inputs
   const [adminResults, setAdminResults] = useState<{ [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } }>({});
   const [adminSaving, setAdminSaving] = useState<{ [matchId: string]: boolean }>({});
-  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions">("results");
+  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions" | "groups">("results");
   const [adminSelectedUserId, setAdminSelectedUserId] = useState<string>("");
   const [adminUserPredictions, setAdminUserPredictions] = useState<{ [matchId: string]: Prediction }>({});
   const [adminUserDrafts, setAdminUserDrafts] = useState<{ [matchId: string]: { goals1: string; goals2: string } }>({});
   const [adminSavingUserPreds, setAdminSavingUserPreds] = useState<{ [matchId: string]: boolean }>({});
   const [adminRecalculating, setAdminRecalculating] = useState(false);
+
+  // Groups states
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>("global");
+  const [inviteGroupCode, setInviteGroupCode] = useState<string | null>(null);
+  const [inviteGroup, setInviteGroup] = useState<Group | null>(null);
+
+  // Admin group creation inputs
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupCode, setNewGroupCode] = useState("");
+  const [adminGroupSubTab, setAdminGroupSubTab] = useState<"list" | "create">("list");
+  const [isJoining, setIsJoining] = useState(false);
+  const [adminSelectedGroupId, setAdminSelectedGroupId] = useState<string>("");
 
   // Auth Handler
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -246,10 +270,21 @@ export default function Home() {
       setDataLoading(false);
     });
 
+    // 4. Sync Groups
+    const qGroups = query(collection(db, "groups"), orderBy("name", "asc"));
+    const unsubGroups = onSnapshot(qGroups, (snapshot) => {
+      const list: Group[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ ...doc.data() as Group, id: doc.id });
+      });
+      setGroups(list);
+    });
+
     return () => {
       unsubMatches();
       unsubPreds();
       unsubUsers();
+      unsubGroups();
     };
   }, [user]);
 
@@ -285,6 +320,67 @@ export default function Home() {
       unsubAdminUserPreds();
     };
   }, [user, profile?.isAdmin, adminSelectedUserId]);
+
+  // Load group query parameter on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const groupCode = params.get("group");
+      if (groupCode) {
+        setInviteGroupCode(groupCode);
+      }
+    }
+  }, []);
+
+  // Fetch group corresponding to the inviteGroupCode
+  useEffect(() => {
+    if (!inviteGroupCode) return;
+    const q = query(collection(db, "groups"));
+    const unsub = onSnapshot(q, (snapshot) => {
+      let found: Group | null = null;
+      snapshot.forEach((doc) => {
+        const g = doc.data() as Group;
+        if (g.code === inviteGroupCode) {
+          found = { ...g, id: doc.id };
+        }
+      });
+      setInviteGroup(found);
+    });
+    return () => unsub();
+  }, [inviteGroupCode]);
+
+  // Auto-join group if user is authenticated and inviteGroup is loaded
+  useEffect(() => {
+    if (!user || !profile || !inviteGroup) return;
+
+    const currentGroups = profile.groupIds || [];
+    if (!currentGroups.includes(inviteGroup.id)) {
+      const updatedGroups = [...currentGroups, inviteGroup.id];
+      setDoc(doc(db, "users", user.uid), { groupIds: updatedGroups }, { merge: true })
+        .then(() => {
+          alert(`¡Te has unido exitosamente al grupo: ${inviteGroup.name}!`);
+          setInviteGroupCode(null);
+          setInviteGroup(null);
+          if (typeof window !== "undefined") {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("group");
+            window.history.replaceState({}, document.title, url.toString());
+          }
+        })
+        .catch(err => {
+          console.error("Error joining group:", err);
+        });
+    } else {
+      // Already joined, clear invite state
+      setInviteGroupCode(null);
+      setInviteGroup(null);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("group");
+        window.history.replaceState({}, document.title, url.toString());
+      }
+    }
+  }, [user, profile, inviteGroup]);
 
   const saveUserPredictionByAdmin = async (matchId: string) => {
     if (!user || !profile?.isAdmin || !adminSelectedUserId) return;
@@ -492,6 +588,123 @@ export default function Home() {
     }
   };
 
+  const handleCreateGroup = async () => {
+    if (!newGroupName.trim() || !newGroupCode.trim()) {
+      alert("Por favor ingresa el nombre y código del grupo.");
+      return;
+    }
+    if (groups.some(g => g.code === newGroupCode)) {
+      alert("El código de grupo ya está en uso.");
+      return;
+    }
+    try {
+      const newGroupRef = doc(collection(db, "groups"));
+      const newGroup: Group = {
+        id: newGroupRef.id,
+        name: newGroupName.trim(),
+        code: newGroupCode.trim(),
+        createdAt: new Date(),
+        createdBy: user?.uid || "admin",
+        admins: user?.uid ? [user.uid] : ["admin"]
+      };
+      await setDoc(newGroupRef, newGroup);
+      setNewGroupName("");
+      setNewGroupCode("");
+      alert("Grupo creado exitosamente.");
+    } catch (err) {
+      console.error("Error creating group:", err);
+      alert("Error al crear el grupo.");
+    }
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    if (!window.confirm("¿Estás seguro de eliminar este grupo? Los usuarios no serán eliminados pero ya no pertenecerán a este grupo.")) return;
+    try {
+      await deleteDoc(doc(db, "groups", groupId));
+      const usersToUpdate = leaderboard.filter(u => u.groupIds?.includes(groupId));
+      const batch = writeBatch(db);
+      usersToUpdate.forEach(u => {
+        const newGroupIds = u.groupIds?.filter(id => id !== groupId) || [];
+        batch.update(doc(db, "users", u.uid), { groupIds: newGroupIds });
+      });
+      await batch.commit();
+      if (adminSelectedGroupId === groupId) {
+        setAdminSelectedGroupId("");
+      }
+      alert("Grupo eliminado exitosamente.");
+    } catch (err) {
+      console.error("Error deleting group:", err);
+      alert("Error al eliminar el grupo.");
+    }
+  };
+
+  const handleAddUserToGroup = async (userId: string, groupId: string) => {
+    try {
+      const userProf = leaderboard.find(u => u.uid === userId);
+      if (!userProf) return;
+      const currentGroups = userProf.groupIds || [];
+      if (!currentGroups.includes(groupId)) {
+        const updatedGroups = [...currentGroups, groupId];
+        await setDoc(doc(db, "users", userId), { groupIds: updatedGroups }, { merge: true });
+        alert("Jugador agregado al grupo.");
+      }
+    } catch (err) {
+      console.error("Error adding user to group:", err);
+      alert("Error al agregar jugador al grupo.");
+    }
+  };
+
+  const handleRemoveUserFromGroup = async (userId: string, groupId: string) => {
+    if (!window.confirm("¿Estás seguro de quitar a este jugador del grupo?")) return;
+    try {
+      const userProf = leaderboard.find(u => u.uid === userId);
+      if (!userProf) return;
+      const currentGroups = userProf.groupIds || [];
+      const updatedGroups = currentGroups.filter(id => id !== groupId);
+      await setDoc(doc(db, "users", userId), { groupIds: updatedGroups }, { merge: true });
+      alert("Jugador removido del grupo.");
+    } catch (err) {
+      console.error("Error removing user from group:", err);
+      alert("Error al remover jugador del grupo.");
+    }
+  };
+
+  const handlePromoteToGroupAdmin = async (userId: string, groupId: string) => {
+    try {
+      const activeGroup = groups.find((g) => g.id === groupId);
+      if (!activeGroup) return;
+      const currentAdmins = activeGroup.admins || [];
+      if (!currentAdmins.includes(userId)) {
+        const updatedAdmins = [...currentAdmins, userId];
+        await setDoc(doc(db, "groups", groupId), { admins: updatedAdmins }, { merge: true });
+        alert("Usuario promovido a administrador del grupo.");
+      }
+    } catch (err) {
+      console.error("Error promoting to group admin:", err);
+      alert("Error al promover a administrador del grupo.");
+    }
+  };
+
+  const handleDemoteFromGroupAdmin = async (userId: string, groupId: string) => {
+    try {
+      const activeGroup = groups.find((g) => g.id === groupId);
+      if (!activeGroup) return;
+      const currentAdmins = activeGroup.admins || [];
+      if (currentAdmins.includes(userId)) {
+        if (currentAdmins.length === 1) {
+          alert("Debe haber al menos un administrador en el grupo.");
+          return;
+        }
+        const updatedAdmins = currentAdmins.filter(id => id !== userId);
+        await setDoc(doc(db, "groups", groupId), { admins: updatedAdmins }, { merge: true });
+        alert("Usuario removido de los administradores del grupo.");
+      }
+    } catch (err) {
+      console.error("Error demoting from group admin:", err);
+      alert("Error al remover de los administradores del grupo.");
+    }
+  };
+
   // Compute financial metrics dynamically in real-time
   const financialStats = React.useMemo(() => {
     const sortedMatches = [...matches].sort((a, b) => a.num - b.num);
@@ -549,6 +762,14 @@ export default function Home() {
 
     return { stats, currentRollover: rollover };
   }, [matches, allPredictions, leaderboard]);
+
+  // Filtered leaderboard based on selected group
+  const displayedLeaderboard = React.useMemo(() => {
+    if (selectedGroupId === "global") {
+      return leaderboard;
+    }
+    return leaderboard.filter((u) => u.groupIds?.includes(selectedGroupId));
+  }, [leaderboard, selectedGroupId]);
 
   // Unique list of rounds for filtering
   const rounds = ["Todos", "Matchday 1", "Matchday 2", "Matchday 3", "Matchday 4", "Matchday 5", "Matchday 6", "Matchday 7", "Matchday 8", "Matchday 9", "Matchday 10", "Matchday 11", "Matchday 12", "Matchday 13", "Matchday 14", "Matchday 15", "Matchday 16", "Matchday 17", "Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Match for third place", "Final"];
@@ -799,9 +1020,14 @@ export default function Home() {
             <span>Posiciones</span>
           </button>
 
-          {profile?.isAdmin && (
+          {(profile?.isAdmin || (user && groups.some(g => g.admins?.includes(user.uid)))) && (
             <button
-              onClick={() => setActiveTab("admin")}
+              onClick={() => {
+                setActiveTab("admin");
+                if (!profile?.isAdmin) {
+                  setAdminSubTab("groups");
+                }
+              }}
               className={`flex-1 lg:flex-none lg:w-full px-4 py-3 rounded-xl font-bold text-sm text-center lg:text-left flex items-center justify-center lg:justify-start space-x-2.5 transition-all shrink-0 ${activeTab === "admin"
                 ? "bg-gradient-to-r from-amber-500/20 to-yellow-500/10 border-b-2 lg:border-b-0 lg:border-l-4 border-amber-500 text-amber-400"
                 : "bg-slate-900/40 hover:bg-slate-900/80 text-slate-400 hover:text-slate-200 border-b-2 border-transparent lg:border-b-0"
@@ -988,12 +1214,56 @@ export default function Home() {
                 </div>
               )}
 
-              {/* TAB: LEADERBOARD */}
               {activeTab === "leaderboard" && (
-                <div className="space-y-6">
-                  <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-6">
-                    <h2 className="text-xl font-extrabold text-slate-200">Tabla de Clasificación</h2>
-                    <p className="text-slate-400 text-xs mt-1">Conoce a los mejores pronosticadores de la copa</p>
+                <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-950/60 pb-4">
+                      <div>
+                        <h2 className="text-xl font-extrabold text-slate-200">Tabla de Clasificación</h2>
+                        <p className="text-slate-400 text-xs mt-1">Conoce a los mejores pronosticadores de la copa</p>
+                      </div>
+
+                      {/* Group Selector Dropdown */}
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <span className="text-xs font-semibold text-slate-400">Grupo:</span>
+                        <select
+                          value={selectedGroupId}
+                          onChange={(e) => setSelectedGroupId(e.target.value)}
+                          className="px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-350 text-xs font-semibold rounded-xl focus:outline-none focus:border-emerald-500 cursor-pointer"
+                        >
+                          <option value="global">🏆 Global</option>
+                          {groups
+                            .filter((g) => profile?.isAdmin || profile?.groupIds?.includes(g.id))
+                            .map((g) => (
+                              <option key={g.id} value={g.id}>👥 {g.name}</option>
+                            ))
+                          }
+                        </select>
+                      </div>
+                    </div>
+
+                    {selectedGroupId !== "global" && (
+                      (() => {
+                        const selGroup = groups.find(g => g.id === selectedGroupId);
+                        if (!selGroup) return null;
+                        const inviteUrl = typeof window !== "undefined" 
+                          ? `${window.location.origin}/?group=${selGroup.code}` 
+                          : `/?group=${selGroup.code}`;
+                        return (
+                          <div className="mt-4 bg-blue-500/5 border border-blue-500/20 text-blue-400 text-xs px-4 py-3 rounded-xl flex items-center justify-between gap-4">
+                            <span className="truncate">🔗 <strong>Enlace de invitación:</strong> <span className="underline select-all text-blue-300">{inviteUrl}</span></span>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(inviteUrl);
+                                alert("Enlace de invitación copiado al portapapeles");
+                              }}
+                              className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-lg text-[10px] font-bold uppercase transition-all shrink-0 active:scale-95"
+                            >
+                              Copiar
+                            </button>
+                          </div>
+                        );
+                      })()
+                    )}
 
                     <div className="mt-4 bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-xs px-4 py-3 rounded-xl flex items-center space-x-2">
                       <span>🏆 <strong>Premios de la Polla:</strong> Al final del torneo, el pozo total recaudado se repartirá así: 1er Puesto: <strong>60%</strong> • 2do Puesto: <strong>30%</strong> • 3er Puesto: <strong>10%</strong>.</span>
@@ -1009,7 +1279,7 @@ export default function Home() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-950">
-                          {leaderboard.map((userProf, index) => {
+                          {displayedLeaderboard.map((userProf, index) => {
                             const isMe = userProf.uid === user.uid;
                             return (
                               <tr
@@ -1077,14 +1347,13 @@ export default function Home() {
                             <span className="text-[10px] text-indigo-500/80 block mt-1">E.g., Pred: 1-2 | Real: 1-0</span>
                           </div>
                         </div>
-                      </div>
                     </div>
                   </div>
                 </div>
               )}
 
               {/* TAB: ADMIN PANEL */}
-              {activeTab === "admin" && profile?.isAdmin && (
+              {activeTab === "admin" && (profile?.isAdmin || (user && groups.some(g => g.admins?.includes(user.uid)))) && (
                 <div className="space-y-6">
                   {/* Admin Header & Sub-Tabs */}
                   <div className="bg-gradient-to-r from-amber-500/10 to-yellow-500/5 border border-amber-500/20 rounded-2xl p-5">
@@ -1092,37 +1361,55 @@ export default function Home() {
                       <div>
                         <h2 className="text-xl font-extrabold text-amber-400">Panel de Administración</h2>
                         <p className="text-slate-400 text-xs mt-1">
-                          Controla los resultados reales del mundial o ajusta las predicciones de los participantes de forma manual.
+                          {profile?.isAdmin 
+                            ? "Controla los resultados reales del mundial, ajusta las predicciones de los participantes o gestiona grupos." 
+                            : "Administra la membresía y parámetros de tus grupos asignados."
+                          }
                         </p>
                       </div>
-                      <button
-                        onClick={recalculateAllScores}
-                        disabled={adminRecalculating}
-                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all self-start md:self-center"
-                      >
-                        {adminRecalculating ? "Recalculando..." : "🔄 Recalcular Todos los Puntos"}
-                      </button>
+                      {profile?.isAdmin && (
+                        <button
+                          onClick={recalculateAllScores}
+                          disabled={adminRecalculating}
+                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all self-start md:self-center"
+                        >
+                          {adminRecalculating ? "Recalculando..." : "🔄 Recalcular Todos los Puntos"}
+                        </button>
+                      )}
                     </div>
 
                     {/* Sub-Tabs Navigation */}
                     <div className="flex space-x-2 mt-4 border-t border-slate-900 pt-4">
+                      {profile?.isAdmin && (
+                        <>
+                          <button
+                            onClick={() => setAdminSubTab("results")}
+                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "results"
+                              ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                              : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
+                              }`}
+                          >
+                            ⚽ Resultados del Mundial
+                          </button>
+                          <button
+                            onClick={() => setAdminSubTab("predictions")}
+                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "predictions"
+                              ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                              : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
+                              }`}
+                          >
+                            👤 Pronósticos de Jugadores
+                          </button>
+                        </>
+                      )}
                       <button
-                        onClick={() => setAdminSubTab("results")}
-                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "results"
+                        onClick={() => setAdminSubTab("groups")}
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "groups"
                           ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
                           : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
                           }`}
                       >
-                        ⚽ Resultados del Mundial
-                      </button>
-                      <button
-                        onClick={() => setAdminSubTab("predictions")}
-                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "predictions"
-                          ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
-                          : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
-                          }`}
-                      >
-                        👤 Pronósticos de Jugadores
+                        👥 Administrar Grupos
                       </button>
                     </div>
                   </div>
@@ -1409,6 +1696,218 @@ export default function Home() {
                                 </div>
                               );
                             })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {adminSubTab === "groups" && (
+                    <div className="space-y-4">
+                      {/* Sub-tabs for groups admin: list / create */}
+                      <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-4 flex items-center justify-between">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => setAdminGroupSubTab("list")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              adminGroupSubTab === "list"
+                                ? "bg-amber-500 text-slate-950"
+                                : "bg-slate-950 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            Listado de Grupos
+                          </button>
+                          <button
+                            onClick={() => setAdminGroupSubTab("create")}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              adminGroupSubTab === "create"
+                                ? "bg-amber-500 text-slate-950"
+                                : "bg-slate-950 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            + Crear Nuevo Grupo
+                          </button>
+                        </div>
+                      </div>
+
+                      {adminGroupSubTab === "create" && (
+                        <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
+                          <h3 className="font-extrabold text-slate-200 text-sm">Crear un Nuevo Grupo</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Nombre del Grupo</label>
+                              <input
+                                type="text"
+                                value={newGroupName}
+                                onChange={(e) => {
+                                  setNewGroupName(e.target.value);
+                                  // Auto-generate code
+                                  setNewGroupCode(e.target.value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-"));
+                                }}
+                                className="w-full px-4 py-2 bg-slate-950 border border-slate-800 text-slate-250 rounded-xl focus:outline-none focus:border-amber-500 text-sm"
+                                placeholder="Ej. Amigos de la Oficina"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Código de Invitación (Slug único)</label>
+                              <input
+                                type="text"
+                                value={newGroupCode}
+                                onChange={(e) => setNewGroupCode(e.target.value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-"))}
+                                className="w-full px-4 py-2 bg-slate-950 border border-slate-800 text-slate-250 rounded-xl focus:outline-none focus:border-amber-500 text-sm"
+                                placeholder="ej-amigos-oficina"
+                              />
+                            </div>
+                          </div>
+                          <button
+                            onClick={handleCreateGroup}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all active:scale-95"
+                          >
+                            Crear Grupo
+                          </button>
+                        </div>
+                      )}
+
+                      {adminGroupSubTab === "list" && (
+                        <div className="space-y-4">
+                          <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5">
+                            <h3 className="font-extrabold text-slate-200 text-sm mb-4">Grupos Existentes</h3>
+                            {groups.length === 0 ? (
+                              <p className="text-slate-500 text-xs">No hay grupos creados todavía.</p>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-slate-800 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                                      <th className="py-2 px-3">Nombre</th>
+                                      <th className="py-2 px-3">Código</th>
+                                      <th className="py-2 px-3">Creado Por</th>
+                                      <th className="py-2 px-3 text-right">Acciones</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-900 text-xs text-slate-300">
+                                    {groups
+                                      .filter((g) => profile?.isAdmin || (user && g.admins?.includes(user.uid)))
+                                      .map((g) => (
+                                        <tr key={g.id} className="hover:bg-slate-900/20">
+                                          <td className="py-3 px-3 font-semibold">{g.name}</td>
+                                          <td className="py-3 px-3 text-slate-400 select-all">{g.code}</td>
+                                          <td className="py-3 px-3 text-slate-500 truncate max-w-[120px]">{g.createdBy === "admin" ? "Admin" : g.createdBy}</td>
+                                          <td className="py-3 px-3 text-right space-x-2">
+                                            <button
+                                              onClick={() => setAdminSelectedGroupId(adminSelectedGroupId === g.id ? "" : g.id)}
+                                              className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg hover:border-slate-700 text-[10px] font-bold text-slate-350"
+                                            >
+                                              {adminSelectedGroupId === g.id ? "Ocultar Miembros" : "Ver Miembros"}
+                                            </button>
+                                            {profile?.isAdmin && (
+                                              <button
+                                                onClick={() => handleDeleteGroup(g.id)}
+                                                className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400"
+                                              >
+                                                Eliminar
+                                              </button>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+
+                          {adminSelectedGroupId && (
+                            (() => {
+                              const activeGroup = groups.find((g) => g.id === adminSelectedGroupId);
+                              const groupMembers = leaderboard.filter((u) => u.groupIds?.includes(adminSelectedGroupId));
+                              if (!activeGroup) return null;
+                              return (
+                                <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
+                                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                                    <div>
+                                      <h3 className="font-extrabold text-slate-200 text-sm">Miembros de: {activeGroup.name}</h3>
+                                      <p className="text-slate-500 text-[10px]">Total: {groupMembers.length} jugadores</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <select
+                                        id="add-user-select"
+                                        className="px-2 py-1 bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg"
+                                      >
+                                        <option value="">-- Agregar Jugador --</option>
+                                        {leaderboard
+                                          .filter((u) => !u.groupIds?.includes(adminSelectedGroupId))
+                                          .map((u) => (
+                                            <option key={u.uid} value={u.uid}>
+                                              {u.displayName} ({u.email})
+                                            </option>
+                                          ))}
+                                      </select>
+                                      <button
+                                        onClick={async () => {
+                                          const selectEl = document.getElementById("add-user-select") as HTMLSelectElement;
+                                          const userIdToAdd = selectEl?.value;
+                                          if (!userIdToAdd) return;
+                                          await handleAddUserToGroup(userIdToAdd, adminSelectedGroupId);
+                                          selectEl.value = "";
+                                        }}
+                                        className="px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg"
+                                      >
+                                        Agregar
+                                      </button>
+                                    </div>
+                                  </div>
+                                  
+                                  {groupMembers.length === 0 ? (
+                                    <p className="text-slate-500 text-xs">Este grupo no tiene miembros asignados.</p>
+                                  ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {groupMembers.map((member) => {
+                                        const isGrpAdmin = activeGroup.admins?.includes(member.uid) ?? false;
+                                        return (
+                                          <div key={member.uid} className="flex justify-between items-center p-2.5 bg-slate-950/40 rounded-xl border border-slate-900/80">
+                                            <div className="truncate pr-2">
+                                              <p className="font-bold text-slate-250 text-xs flex items-center space-x-1.5">
+                                                <span>{member.displayName}</span>
+                                                {isGrpAdmin && (
+                                                  <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1 py-0.2 rounded font-extrabold uppercase">
+                                                    Admin
+                                                  </span>
+                                                )}
+                                              </p>
+                                              <p className="text-[10px] text-slate-500">{member.email}</p>
+                                            </div>
+                                            <div className="flex items-center space-x-1.5 shrink-0">
+                                              {isGrpAdmin ? (
+                                                <button
+                                                  onClick={() => handleDemoteFromGroupAdmin(member.uid, activeGroup.id)}
+                                                  className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-lg text-[9px] font-bold uppercase transition-colors"
+                                                >
+                                                  Quitar Admin
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  onClick={() => handlePromoteToGroupAdmin(member.uid, activeGroup.id)}
+                                                  className="px-2 py-1 bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-350 rounded-lg text-[9px] font-bold uppercase transition-colors"
+                                                >
+                                                  Hacer Admin
+                                                </button>
+                                              )}
+                                              <button
+                                                onClick={() => handleRemoveUserFromGroup(member.uid, adminSelectedGroupId)}
+                                                className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/10 rounded-lg text-[9px] font-bold uppercase transition-colors"
+                                              >
+                                                Quitar
+                                              </button>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()
                           )}
                         </div>
                       )}

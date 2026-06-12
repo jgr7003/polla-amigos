@@ -9,10 +9,14 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
 
-    // Reglas para usuarios (cada usuario puede leer todos, pero solo escribir el propio o si es administrador)
+    // Reglas para usuarios (cada usuario puede leer todos, pero solo escribir el propio, si es admin global, o si un admin de grupo modifica el campo groupIds)
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow write: if request.auth != null && (
+        request.auth.uid == userId || 
+        isAdmin() ||
+        (resource != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['groupIds']))
+      );
     }
     
     // Reglas para partidos (cualquier usuario logueado puede leerlos, solo admins pueden modificarlos)
@@ -25,6 +29,17 @@ service cloud.firestore {
     match /predictions/{predictionId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && (request.resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Reglas para grupos (cualquier persona puede leerlos, crear requiere auth, modificar requiere ser superadmin o admin del grupo, eliminar requiere ser superadmin)
+    match /groups/{groupId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        isAdmin() || 
+        (resource != null && request.auth.uid in resource.data.admins)
+      );
+      allow delete: if isAdmin();
     }
   }
 }
