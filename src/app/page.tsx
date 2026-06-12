@@ -888,7 +888,11 @@ export default function Home() {
                                       ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                                       : (pred?.points ?? 0) === 3
                                       ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                                      : "bg-slate-800 text-slate-500"
+                                      : (pred?.points ?? 0) === 2
+                                      ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                                      : (pred?.points ?? 0) === 1
+                                      ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                                      : "bg-slate-800 text-slate-500 border border-transparent"
                                     }`}>
                                     +{pred?.points ?? 0} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                   </span>
@@ -954,6 +958,61 @@ export default function Home() {
                           })}
                         </tbody>
                       </table>
+                    </div>
+
+                    {/* Scoring System Information */}
+                    <div className="mt-6 bg-slate-900/40 border border-slate-900 rounded-xl p-5">
+                      <h3 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
+                        <span>🎯</span>
+                        <span>Sistema de Puntuación</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-1">Cómo se calculan los puntos de cada partido:</p>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                        <div className="bg-slate-950/40 border border-emerald-500/10 rounded-xl p-3 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-slate-400">Marcador Exacto</span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">+5 Pts</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-2">Acertar el marcador exacto del partido.</p>
+                          </div>
+                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 2-1 | Real 2-1</span>
+                        </div>
+
+                        <div className="bg-slate-950/40 border border-amber-500/10 rounded-xl p-3 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-slate-400">Resultado y Diferencia</span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">+3 Pts</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-2">Acertar el ganador/empate y la diferencia de goles exacta.</p>
+                          </div>
+                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 3-1 | Real 2-0</span>
+                        </div>
+
+                        <div className="bg-slate-950/40 border border-blue-500/10 rounded-xl p-3 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-slate-400">Solo Resultado</span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">+2 Pts</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-2">Acertar el ganador o empate, pero no la diferencia exacta.</p>
+                          </div>
+                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 2-1 | Real 3-0</span>
+                        </div>
+
+                        <div className="bg-slate-950/40 border border-indigo-500/10 rounded-xl p-3 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-slate-400">Marcador Parcial</span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">+1 Pt</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-2">No acertar el resultado, pero acertar los goles de un equipo.</p>
+                          </div>
+                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 1-2 | Real 1-0</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1264,6 +1323,10 @@ export default function Home() {
                                           ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                           : pred.points === 3
                                           ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                          : pred.points === 2
+                                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                          : pred.points === 1
+                                          ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
                                           : "bg-slate-800 text-slate-500 border-transparent"
                                         }`}>
                                         +{pred.points} Pts

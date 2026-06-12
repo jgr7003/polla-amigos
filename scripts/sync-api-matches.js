@@ -24,6 +24,7 @@ const db = getFirestore();
 
 // Points calculator logic
 function calculatePoints(predGoals1, predGoals2, realGoals1, realGoals2) {
+  // 1. Marcador Exacto (5 Puntos)
   if (predGoals1 === realGoals1 && predGoals2 === realGoals2) {
     return 5;
   }
@@ -31,12 +32,24 @@ function calculatePoints(predGoals1, predGoals2, realGoals1, realGoals2) {
   const predDiff = predGoals1 - predGoals2;
   const realDiff = realGoals1 - realGoals2;
   
-  if (
+  const correctOutcome =
     (predDiff > 0 && realDiff > 0) || // Gana equipo 1
     (predDiff < 0 && realDiff < 0) || // Gana equipo 2
-    (predDiff === 0 && realDiff === 0)    // Empate
-  ) {
+    (predDiff === 0 && realDiff === 0);   // Empate
+  
+  // 2. Resultado Exacto con Diferencia de Goles (3 Puntos)
+  if (correctOutcome && predDiff === realDiff) {
     return 3;
+  }
+  
+  // 3. Acierto de Resultado (2 Puntos)
+  if (correctOutcome) {
+    return 2;
+  }
+  
+  // 4. Marcador Parcial (1 Punto)
+  if (predGoals1 === realGoals1 || predGoals2 === realGoals2) {
+    return 1;
   }
   
   return 0;
