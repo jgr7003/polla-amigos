@@ -1143,21 +1143,23 @@ export default function Home() {
                             </div>
 
                             {/* Teams and Inputs */}
-                            <div className="flex items-center justify-between gap-3 my-2">
+                            <div className="flex items-center justify-between gap-2 my-2">
                               {/* Team 1 */}
-                              <div className="flex-1 flex items-center justify-end space-x-2 font-bold text-sm sm:text-base text-slate-200 truncate">
-                                <span className="truncate">{match.team1}</span>
+                              <div className="flex-1 flex flex-col items-center justify-center space-y-1 font-bold text-slate-200">
                                 {getFlagUrl(match.team1) && (
                                   <img
                                     src={getFlagUrl(match.team1)!}
                                     alt={match.team1}
-                                    className="w-6 h-4 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
+                                    className="w-8 h-5.5 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
                                   />
                                 )}
+                                <span className="text-xs sm:text-sm text-center leading-tight max-w-[80px] sm:max-w-[110px] truncate" title={match.team1}>
+                                  {match.team1}
+                                </span>
                               </div>
 
                               {/* Prediction / Score inputs */}
-                              <div className="flex items-center space-x-2">
+                              <div className="flex items-center space-x-1.5 shrink-0">
                                 <input
                                   type="text"
                                   inputMode="numeric"
@@ -1171,10 +1173,10 @@ export default function Home() {
                                       [match.id]: { ...draft, goals1: val }
                                     }));
                                   }}
-                                  className="w-12 h-12 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-lg font-extrabold rounded-xl focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
+                                  className="w-10 h-10 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-base font-extrabold rounded-lg focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
                                   placeholder="-"
                                 />
-                                <span className="text-slate-600 font-bold">vs</span>
+                                <span className="text-slate-600 font-bold text-xs">vs</span>
                                 <input
                                   type="text"
                                   inputMode="numeric"
@@ -1188,21 +1190,23 @@ export default function Home() {
                                       [match.id]: { ...draft, goals2: val }
                                     }));
                                   }}
-                                  className="w-12 h-12 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-lg font-extrabold rounded-xl focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
+                                  className="w-10 h-10 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-base font-extrabold rounded-lg focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
                                   placeholder="-"
                                 />
                               </div>
 
                               {/* Team 2 */}
-                              <div className="flex-1 flex items-center justify-start space-x-2 font-bold text-sm sm:text-base text-slate-200 truncate">
+                              <div className="flex-1 flex flex-col items-center justify-center space-y-1 font-bold text-slate-200">
                                 {getFlagUrl(match.team2) && (
                                   <img
                                     src={getFlagUrl(match.team2)!}
                                     alt={match.team2}
-                                    className="w-6 h-4 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
+                                    className="w-8 h-5.5 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
                                   />
                                 )}
-                                <span className="truncate">{match.team2}</span>
+                                <span className="text-xs sm:text-sm text-center leading-tight max-w-[80px] sm:max-w-[110px] truncate" title={match.team2}>
+                                  {match.team2}
+                                </span>
                               </div>
                             </div>
 
