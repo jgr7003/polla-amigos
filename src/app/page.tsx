@@ -47,6 +47,60 @@ interface UserProfile {
   isAdmin?: boolean;
 }
 
+function getMatchStartDate(match: Match): Date {
+  try {
+    const timeClean = match.time.replace("UTC", "").trim();
+    const parts = timeClean.split(" ");
+    const timePart = parts[0]; // "13:00"
+    const offsetPart = parts[1] || "-5"; // default offset
+
+    let offsetFormatted = "";
+    if (offsetPart.startsWith("-") || offsetPart.startsWith("+")) {
+      const sign = offsetPart.substring(0, 1);
+      const val = offsetPart.substring(1);
+      const valNum = Number(val);
+      const hoursStr = String(valNum).padStart(2, "0");
+      offsetFormatted = `${sign}${hoursStr}:00`;
+    } else {
+      const valNum = Number(offsetPart);
+      if (!isNaN(valNum)) {
+        const sign = valNum >= 0 ? "+" : "-";
+        const hoursStr = String(Math.abs(valNum)).padStart(2, "0");
+        offsetFormatted = `${sign}${hoursStr}:00`;
+      } else {
+        offsetFormatted = "-05:00";
+      }
+    }
+
+    const isoString = `${match.date}T${timePart}:00${offsetFormatted}`;
+    const date = new Date(isoString);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  } catch (e) {
+    console.error("Error parsing match date:", e);
+  }
+  return new Date(match.date);
+}
+
+function hasMatchStarted(match: Match): boolean {
+  if (match.result !== null) {
+    return true;
+  }
+  const startDate = getMatchStartDate(match);
+  return Date.now() >= startDate.getTime();
+}
+
+function formatMatchDateTimeLocal(match: Match): string {
+  const date = getMatchStartDate(match);
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${day}/${month}/${year} • ${hours}:${minutes}`;
+}
+
 export default function Home() {
   const {
     user,
@@ -293,9 +347,13 @@ export default function Home() {
 
     setSavingMatches(prev => ({ ...prev, [matchId]: true }));
     try {
-      const predId = `${user.uid}_${matchId}`;
       const match = matches.find(m => m.id === matchId);
+      if (match && hasMatchStarted(match)) {
+        alert("El partido ya ha iniciado o finalizado. No se puede guardar ni modificar el pronóstico.");
+        return;
+      }
 
+      const predId = `${user.uid}_${matchId}`;
       let pts = 0;
       if (match?.result) {
         pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2);
@@ -806,7 +864,7 @@ export default function Home() {
                             {/* Match Header */}
                             <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4">
                               <span className="font-bold text-emerald-500">{match.round} {match.group ? `• ${match.group}` : ""}</span>
-                              <span>{match.date} • {match.time.split(" ")[0]}</span>
+                              <span>{formatMatchDateTimeLocal(match)}</span>
                             </div>
 
                             {/* Teams and Inputs */}
@@ -830,7 +888,7 @@ export default function Home() {
                                   inputMode="numeric"
                                   pattern="[0-9]*"
                                   value={draft.goals1}
-                                  disabled={hasResult || isSaving}
+                                  disabled={hasResult || isSaving || hasMatchStarted(match)}
                                   onChange={(e) => {
                                     const val = e.target.value.replace(/[^0-9]/g, "");
                                     setPredictionDrafts(prev => ({
@@ -847,7 +905,7 @@ export default function Home() {
                                   inputMode="numeric"
                                   pattern="[0-9]*"
                                   value={draft.goals2}
-                                  disabled={hasResult || isSaving}
+                                  disabled={hasResult || isSaving || hasMatchStarted(match)}
                                   onChange={(e) => {
                                     const val = e.target.value.replace(/[^0-9]/g, "");
                                     setPredictionDrafts(prev => ({
@@ -896,6 +954,21 @@ export default function Home() {
                                     }`}>
                                     +{pred?.points ?? 0} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                   </span>
+                                </div>
+                              ) : hasMatchStarted(match) ? (
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-xs bg-slate-950 border border-slate-800 text-amber-500 px-2.5 py-1 rounded-lg font-bold">
+                                    ⚡ En Juego
+                                  </span>
+                                  {pred ? (
+                                    <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-400">
+                                      Pronóstico: {pred.goals1} - {pred.goals2}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
+                                      Sin pronóstico
+                                    </span>
+                                  )}
                                 </div>
                               ) : (
                                 <button
@@ -1110,7 +1183,7 @@ export default function Home() {
                                       />
                                     )}
                                   </h3>
-                                  <span className="text-[10px] text-slate-500">{match.ground} • {match.date}</span>
+                                  <span className="text-[10px] text-slate-500">{match.ground} • {formatMatchDateTimeLocal(match)}</span>
                                 </div>
 
                                 <div className="flex items-center space-x-3">
@@ -1263,7 +1336,7 @@ export default function Home() {
                                       )}
                                     </h3>
                                     <div className="flex items-center space-x-2 mt-1">
-                                      <span className="text-[10px] text-slate-500">{match.date} • {match.ground}</span>
+                                       <span className="text-[10px] text-slate-500">{formatMatchDateTimeLocal(match)} • {match.ground}</span>
                                       {hasResult && (
                                         <span className="text-[10px] bg-slate-950 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
                                           Resultado real: {match.result?.goals1} - {match.result?.goals2}
