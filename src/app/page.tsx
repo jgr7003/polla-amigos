@@ -125,6 +125,9 @@ export default function Home() {
     removeSavedAccount
   } = useAuth();
 
+  // Ref for scrolling to the members section
+  const membersSectionRef = React.useRef<HTMLDivElement>(null);
+
   // Auth state inputs
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -151,7 +154,7 @@ export default function Home() {
   // Admin inputs
   const [adminResults, setAdminResults] = useState<{ [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } }>({});
   const [adminSaving, setAdminSaving] = useState<{ [matchId: string]: boolean }>({});
-  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions" | "groups" | "users">("results");
+  const [adminSubTab, setAdminSubTab] = useState<"results" | "predictions" | "groups">("results");
   const [adminSelectedUserId, setAdminSelectedUserId] = useState<string>("");
   const [adminUserPredictions, setAdminUserPredictions] = useState<{ [matchId: string]: Prediction }>({});
   const [adminUserDrafts, setAdminUserDrafts] = useState<{ [matchId: string]: { goals1: string; goals2: string } }>({});
@@ -328,7 +331,6 @@ export default function Home() {
       const groupCode = params.get("group");
       if (groupCode) {
         setInviteGroupCode(groupCode);
-        setIsRegistering(true);
       }
     }
   }, []);
@@ -382,6 +384,15 @@ export default function Home() {
       }
     }
   }, [user, profile, inviteGroup]);
+
+  // Scroll to members section when a group is selected to view members
+  useEffect(() => {
+    if (adminSelectedGroupId) {
+      setTimeout(() => {
+        membersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
+  }, [adminSelectedGroupId]);
 
   const saveUserPredictionByAdmin = async (matchId: string) => {
     if (!user || !profile?.isAdmin || !adminSelectedUserId) return;
@@ -706,34 +717,6 @@ export default function Home() {
     }
   };
 
-  const handleForceDeleteUser = async (userId: string) => {
-    if (!profile?.isAdmin) return;
-    const targetUser = leaderboard.find(u => u.uid === userId);
-    if (!targetUser) return;
-    
-    if (!window.confirm(`¿Estás absolutamente seguro de eliminar al usuario "${targetUser.displayName}" (${targetUser.email})? Se borrarán sus puntos y todas sus predicciones permanentemente. (El usuario no podrá ingresar ni figurar en la polla).`)) return;
-    
-    try {
-      const batch = writeBatch(db);
-      // Delete user document in users collection
-      batch.delete(doc(db, "users", userId));
-      
-      // Fetch and delete predictions of this user
-      const predsSnap = await getDocs(collection(db, "predictions"));
-      predsSnap.forEach((doc) => {
-        if (doc.data().userId === userId) {
-          batch.delete(doc.ref);
-        }
-      });
-      
-      await batch.commit();
-      alert(`Usuario "${targetUser.displayName}" eliminado exitosamente.`);
-    } catch (err) {
-      console.error("Error deleting user:", err);
-      alert("Error al eliminar el usuario.");
-    }
-  };
-
   // Compute financial metrics dynamically in real-time
   const financialStats = React.useMemo(() => {
     const sortedMatches = [...matches].sort((a, b) => a.num - b.num);
@@ -792,50 +775,20 @@ export default function Home() {
     return { stats, currentRollover: rollover };
   }, [matches, allPredictions, leaderboard]);
 
-  // Filtered leaderboard based on selected group and sorted by points then exact count tiebreaker
-  const userExactCounts = React.useMemo(() => {
-    const counts: { [userId: string]: number } = {};
-    allPredictions.forEach((pred) => {
-      if (pred.points === 5) {
-        counts[pred.userId] = (counts[pred.userId] || 0) + 1;
-      }
-    });
-    return counts;
-  }, [allPredictions]);
-
+  // Filtered leaderboard based on selected group
   const displayedLeaderboard = React.useMemo(() => {
-    const baseList = selectedGroupId === "global"
-      ? leaderboard
-      : leaderboard.filter((u) => u.groupIds?.includes(selectedGroupId));
-      
-    return [...baseList].sort((a, b) => {
-      if (b.points !== a.points) {
-        return b.points - a.points;
-      }
-      const exactA = userExactCounts[a.uid] || 0;
-      const exactB = userExactCounts[b.uid] || 0;
-      return exactB - exactA;
-    });
-  }, [leaderboard, selectedGroupId, userExactCounts]);
+    if (selectedGroupId === "global") {
+      return leaderboard;
+    }
+    return leaderboard.filter((u) => u.groupIds?.includes(selectedGroupId));
+  }, [leaderboard, selectedGroupId]);
 
   // Unique list of rounds for filtering
   const rounds = ["Todos", "Matchday 1", "Matchday 2", "Matchday 3", "Matchday 4", "Matchday 5", "Matchday 6", "Matchday 7", "Matchday 8", "Matchday 9", "Matchday 10", "Matchday 11", "Matchday 12", "Matchday 13", "Matchday 14", "Matchday 15", "Matchday 16", "Matchday 17", "Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Match for third place", "Final"];
 
-  // Sort matches chronologically
-  const sortedMatches = React.useMemo(() => {
-    return [...matches].sort((a, b) => {
-      const dateA = getMatchStartDate(a).getTime();
-      const dateB = getMatchStartDate(b).getTime();
-      if (dateA !== dateB) {
-        return dateA - dateB;
-      }
-      return a.num - b.num;
-    });
-  }, [matches]);
-
   const filteredMatches = selectedRound === "Todos"
-    ? sortedMatches
-    : sortedMatches.filter(m => m.round === selectedRound);
+    ? matches
+    : matches.filter(m => m.round === selectedRound);
 
   if (loading) {
     return (
@@ -863,14 +816,6 @@ export default function Home() {
               {isRegistering ? "Regístrate para pronosticar los 104 partidos" : "Inicia sesión para ver tu puntaje y pronósticos"}
             </p>
           </div>
-
-          {inviteGroup && (
-            <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center text-xs text-emerald-400">
-              👋 Te han invitado a unirte al grupo: <strong>{inviteGroup.name}</strong>.
-              <br />
-              <span className="text-slate-400 mt-1 block">Regístrate o inicia sesión abajo para unirte.</span>
-            </div>
-          )}
 
           {savedAccounts.length > 0 && !isRegistering && (
             <div className="mb-6 border-b border-slate-800/60 pb-5">
@@ -1161,23 +1106,21 @@ export default function Home() {
                             </div>
 
                             {/* Teams and Inputs */}
-                            <div className="flex items-center justify-between gap-2 my-2">
+                            <div className="flex items-center justify-between gap-3 my-2">
                               {/* Team 1 */}
-                              <div className="flex-1 flex flex-col items-center justify-center space-y-1 font-bold text-slate-200">
+                              <div className="flex-1 flex items-center justify-end space-x-2 font-bold text-sm sm:text-base text-slate-200 truncate">
+                                <span className="truncate">{match.team1}</span>
                                 {getFlagUrl(match.team1) && (
                                   <img
                                     src={getFlagUrl(match.team1)!}
                                     alt={match.team1}
-                                    className="w-8 h-5.5 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
+                                    className="w-6 h-4 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
                                   />
                                 )}
-                                <span className="text-xs sm:text-sm text-center leading-tight max-w-[80px] sm:max-w-[110px] truncate" title={match.team1}>
-                                  {match.team1}
-                                </span>
                               </div>
 
                               {/* Prediction / Score inputs */}
-                              <div className="flex items-center space-x-1.5 shrink-0">
+                              <div className="flex items-center space-x-2">
                                 <input
                                   type="text"
                                   inputMode="numeric"
@@ -1191,10 +1134,10 @@ export default function Home() {
                                       [match.id]: { ...draft, goals1: val }
                                     }));
                                   }}
-                                  className="w-10 h-10 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-base font-extrabold rounded-lg focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
+                                  className="w-12 h-12 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-lg font-extrabold rounded-xl focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
                                   placeholder="-"
                                 />
-                                <span className="text-slate-600 font-bold text-xs">vs</span>
+                                <span className="text-slate-600 font-bold">vs</span>
                                 <input
                                   type="text"
                                   inputMode="numeric"
@@ -1208,23 +1151,21 @@ export default function Home() {
                                       [match.id]: { ...draft, goals2: val }
                                     }));
                                   }}
-                                  className="w-10 h-10 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-base font-extrabold rounded-lg focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
+                                  className="w-12 h-12 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-lg font-extrabold rounded-xl focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
                                   placeholder="-"
                                 />
                               </div>
 
                               {/* Team 2 */}
-                              <div className="flex-1 flex flex-col items-center justify-center space-y-1 font-bold text-slate-200">
+                              <div className="flex-1 flex items-center justify-start space-x-2 font-bold text-sm sm:text-base text-slate-200 truncate">
                                 {getFlagUrl(match.team2) && (
                                   <img
                                     src={getFlagUrl(match.team2)!}
                                     alt={match.team2}
-                                    className="w-8 h-5.5 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
+                                    className="w-6 h-4 object-cover rounded-sm shadow-sm border border-slate-900 shrink-0"
                                   />
                                 )}
-                                <span className="text-xs sm:text-sm text-center leading-tight max-w-[80px] sm:max-w-[110px] truncate" title={match.team2}>
-                                  {match.team2}
-                                </span>
+                                <span className="truncate">{match.team2}</span>
                               </div>
                             </div>
 
@@ -1239,14 +1180,14 @@ export default function Home() {
                                     {match.result?.isFinal === false ? "En Vivo: " : "Final: "}{match.result?.goals1} - {match.result?.goals2}
                                   </span>
                                   <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 5
-                                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                      : (pred?.points ?? 0) === 3
-                                        ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                                        : (pred?.points ?? 0) === 2
-                                          ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                                          : (pred?.points ?? 0) === 1
-                                            ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                                            : "bg-slate-800 text-slate-500 border border-transparent"
+                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                    : (pred?.points ?? 0) === 3
+                                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                      : (pred?.points ?? 0) === 2
+                                        ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                                        : (pred?.points ?? 0) === 1
+                                          ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                                          : "bg-slate-800 text-slate-500 border border-transparent"
                                     }`}>
                                     +{pred?.points ?? 0} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                   </span>
@@ -1339,10 +1280,6 @@ export default function Home() {
                     <span>🏆 <strong>Premios de la Polla:</strong> Al final del torneo, el pozo total recaudado se repartirá así: 1er Puesto: <strong>60%</strong> • 2do Puesto: <strong>30%</strong> • 3er Puesto: <strong>10%</strong>.</span>
                   </div>
 
-                  <div className="mt-3 bg-slate-900/40 border border-slate-900 text-slate-400 text-xs px-4 py-3 rounded-xl">
-                    <span>ℹ️ <strong>Criterio de Desempate:</strong> En caso de empate en puntos, la posición en la tabla se definirá a favor del jugador que tenga la mayor cantidad de <strong>Marcadores Exactos (5 Puntos)</strong>.</span>
-                  </div>
-
                   <div className="mt-6 overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
                     <table className="w-full text-left border-collapse min-w-[300px]">
                       <thead>
@@ -1365,10 +1302,7 @@ export default function Home() {
                                 {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
                               </td>
                               <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[150px] sm:max-w-[200px]">
-                                <div className="flex flex-col">
-                                  <span>{userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}</span>
-                                  <span className="text-[10px] text-slate-500">{(userExactCounts[userProf.uid] || 0)} Marcadores Exactos</span>
-                                </div>
+                                {userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}
                               </td>
                               <td className="py-3 sm:py-4 px-3 sm:px-6 text-right font-extrabold text-emerald-400">
                                 {userProf.points}
@@ -1476,15 +1410,6 @@ export default function Home() {
                               }`}
                           >
                             👤 Pronósticos de Jugadores
-                          </button>
-                          <button
-                            onClick={() => setAdminSubTab("users")}
-                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all border ${adminSubTab === "users"
-                              ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
-                              : "bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200"
-                              }`}
-                          >
-                            🛡️ Gestionar Usuarios
                           </button>
                         </>
                       )}
@@ -1757,14 +1682,14 @@ export default function Home() {
                                     {/* Points Indicator if match has result */}
                                     {hasResult && pred && (
                                       <span className={`text-xs font-bold px-2 py-1.5 rounded-lg border ${pred.points === 5
-                                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                          : pred.points === 3
-                                            ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                            : pred.points === 2
-                                              ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                              : pred.points === 1
-                                                ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
-                                                : "bg-slate-800 text-slate-500 border-transparent"
+                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                        : pred.points === 3
+                                          ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                          : pred.points === 2
+                                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                            : pred.points === 1
+                                              ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                                              : "bg-slate-800 text-slate-500 border-transparent"
                                         }`}>
                                         +{pred.points} Pts
                                       </span>
@@ -1795,8 +1720,8 @@ export default function Home() {
                           <button
                             onClick={() => setAdminGroupSubTab("list")}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${adminGroupSubTab === "list"
-                                ? "bg-amber-500 text-slate-950"
-                                : "bg-slate-950 text-slate-400 hover:text-slate-200"
+                              ? "bg-amber-500 text-slate-950"
+                              : "bg-slate-950 text-slate-400 hover:text-slate-200"
                               }`}
                           >
                             Listado de Grupos
@@ -1804,8 +1729,8 @@ export default function Home() {
                           <button
                             onClick={() => setAdminGroupSubTab("create")}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${adminGroupSubTab === "create"
-                                ? "bg-amber-500 text-slate-950"
-                                : "bg-slate-950 text-slate-400 hover:text-slate-200"
+                              ? "bg-amber-500 text-slate-950"
+                              : "bg-slate-950 text-slate-400 hover:text-slate-200"
                               }`}
                           >
                             + Crear Nuevo Grupo
@@ -1864,7 +1789,6 @@ export default function Home() {
                                     <tr className="border-b border-slate-800 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                                       <th className="py-2 px-3">Nombre</th>
                                       <th className="py-2 px-3">Código</th>
-                                      <th className="py-2 px-3">Creado Por</th>
                                       <th className="py-2 px-3 text-right">Acciones</th>
                                     </tr>
                                   </thead>
@@ -1875,34 +1799,35 @@ export default function Home() {
                                         <tr key={g.id} className="hover:bg-slate-900/20">
                                           <td className="py-3 px-3 font-semibold">{g.name}</td>
                                           <td className="py-3 px-3 text-slate-400 select-all">{g.code}</td>
-                                          <td className="py-3 px-3 text-slate-500 truncate max-w-[120px]">{g.createdBy === "admin" ? "Admin" : g.createdBy}</td>
-                                          <td className="py-3 px-3 text-right space-x-2">
-                                            <button
-                                              onClick={() => {
-                                                const inviteUrl = typeof window !== "undefined"
-                                                  ? `${window.location.origin}${window.location.pathname}?group=${g.code}`
-                                                  : `/?group=${g.code}`;
-                                                navigator.clipboard.writeText(inviteUrl);
-                                                alert(`Enlace de invitación para el grupo "${g.name}" copiado.`);
-                                              }}
-                                              className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-bold text-blue-400"
-                                            >
-                                              Copiar Enlace
-                                            </button>
-                                            <button
-                                              onClick={() => setAdminSelectedGroupId(adminSelectedGroupId === g.id ? "" : g.id)}
-                                              className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg hover:border-slate-700 text-[10px] font-bold text-slate-350"
-                                            >
-                                              {adminSelectedGroupId === g.id ? "Ocultar Miembros" : "Ver Miembros"}
-                                            </button>
-                                            {profile?.isAdmin && (
+                                          <td className="py-3 px-3">
+                                            <div className="flex flex-col sm:flex-row justify-end items-end sm:items-center gap-1.5 sm:gap-2">
                                               <button
-                                                onClick={() => handleDeleteGroup(g.id)}
-                                                className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400"
+                                                onClick={() => {
+                                                  const inviteUrl = typeof window !== "undefined"
+                                                    ? `${window.location.origin}${window.location.pathname}?group=${g.code}`
+                                                    : `/?group=${g.code}`;
+                                                  navigator.clipboard.writeText(inviteUrl);
+                                                  alert(`Enlace de invitación para el grupo "${g.name}" copiado.`);
+                                                }}
+                                                className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-bold text-blue-400 whitespace-nowrap"
                                               >
-                                                Eliminar
+                                                Copiar Enlace
                                               </button>
-                                            )}
+                                              <button
+                                                onClick={() => setAdminSelectedGroupId(adminSelectedGroupId === g.id ? "" : g.id)}
+                                                className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg hover:border-slate-700 text-[10px] font-bold text-slate-350 whitespace-nowrap"
+                                              >
+                                                {adminSelectedGroupId === g.id ? "Ocultar Miembros" : "Ver Miembros"}
+                                              </button>
+                                              {profile?.isAdmin && (
+                                                <button
+                                                  onClick={() => handleDeleteGroup(g.id)}
+                                                  className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400 whitespace-nowrap"
+                                                >
+                                                  Eliminar
+                                                </button>
+                                              )}
+                                            </div>
                                           </td>
                                         </tr>
                                       ))}
@@ -1918,16 +1843,16 @@ export default function Home() {
                               const groupMembers = leaderboard.filter((u) => u.groupIds?.includes(adminSelectedGroupId));
                               if (!activeGroup) return null;
                               return (
-                                <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
-                                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                                <div ref={membersSectionRef} className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
+                                  <div className="flex flex-col gap-3 border-b border-slate-800 pb-3">
                                     <div>
                                       <h3 className="font-extrabold text-slate-200 text-sm">Miembros de: {activeGroup.name}</h3>
                                       <p className="text-slate-500 text-[10px]">Total: {groupMembers.length} jugadores</p>
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-col sm:flex-row gap-2 w-full">
                                       <select
                                         id="add-user-select"
-                                        className="px-2 py-1 bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-lg"
+                                        className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-350 text-sm rounded-lg w-full focus:outline-none focus:border-emerald-500 max-w-full"
                                       >
                                         <option value="">-- Agregar Jugador --</option>
                                         {leaderboard
@@ -1946,7 +1871,7 @@ export default function Home() {
                                           await handleAddUserToGroup(userIdToAdd, adminSelectedGroupId);
                                           selectEl.value = "";
                                         }}
-                                        className="px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg"
+                                        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition-all whitespace-nowrap"
                                       >
                                         Agregar
                                       </button>
@@ -2006,47 +1931,6 @@ export default function Home() {
                           )}
                         </div>
                       )}
-                    </div>
-                  )}
-
-                  {adminSubTab === "users" && profile?.isAdmin && (
-                    <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
-                      <h3 className="font-extrabold text-slate-200 text-sm">Gestionar Usuarios Registrados</h3>
-                      <p className="text-slate-500 text-xs">Lista completa de participantes en la plataforma. Elimina usuarios no autorizados para quitarlos de la polla y del ranking.</p>
-                      
-                      <div className="overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
-                        <table className="w-full text-left border-collapse min-w-[400px]">
-                          <thead>
-                            <tr className="bg-slate-900/60 text-slate-400 text-xs font-semibold uppercase tracking-wider">
-                              <th className="py-3 px-4">Jugador</th>
-                              <th className="py-3 px-4">Correo</th>
-                              <th className="py-3 px-4 text-center">Puntos</th>
-                              <th className="py-3 px-4 text-right">Acciones</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-950 text-slate-350 text-xs">
-                            {leaderboard.map((u) => {
-                              const isMe = u.uid === user?.uid;
-                              return (
-                                <tr key={u.uid} className="hover:bg-slate-900/20">
-                                  <td className="py-3 px-4 font-bold">{u.displayName} {isMe && "(Tú)"}</td>
-                                  <td className="py-3 px-4 text-slate-450">{u.email}</td>
-                                  <td className="py-3 px-4 text-center font-extrabold text-emerald-400">{u.points}</td>
-                                  <td className="py-3 px-4 text-right">
-                                    <button
-                                      onClick={() => handleForceDeleteUser(u.uid)}
-                                      disabled={isMe}
-                                      className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400 uppercase tracking-wide disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                                    >
-                                      Eliminar
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
                     </div>
                   )}
                 </div>
