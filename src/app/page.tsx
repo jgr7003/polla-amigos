@@ -331,6 +331,7 @@ export default function Home() {
       const groupCode = params.get("group");
       if (groupCode) {
         setInviteGroupCode(groupCode);
+        setIsRegistering(true);
       }
     }
   }, []);
@@ -855,6 +856,14 @@ export default function Home() {
               {isRegistering ? "Regístrate para pronosticar los 104 partidos" : "Inicia sesión para ver tu puntaje y pronósticos"}
             </p>
           </div>
+
+          {inviteGroup && (
+            <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center text-xs text-emerald-450">
+              👋 Te han invitado a unirte al grupo: <strong>{inviteGroup.name}</strong>.
+              <br />
+              <span className="text-slate-400 mt-1 block">Regístrate o inicia sesión abajo para unirte.</span>
+            </div>
+          )}
 
           {savedAccounts.length > 0 && !isRegistering && (
             <div className="mb-6 border-b border-slate-800/60 pb-5">
