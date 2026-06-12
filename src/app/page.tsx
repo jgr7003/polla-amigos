@@ -651,7 +651,7 @@ export default function Home() {
 
   // Logged in user dashboard
   return (
-    <div className="flex-1 flex flex-col bg-slate-950 min-h-screen">
+    <div className="flex-1 flex flex-col bg-slate-950 min-h-screen overflow-x-hidden">
       {/* Header */}
       <header className="bg-slate-900/40 backdrop-blur-md border-b border-slate-900 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -961,56 +961,48 @@ export default function Home() {
                     </div>
 
                     {/* Scoring System Information */}
-                    <div className="mt-6 bg-slate-900/40 border border-slate-900 rounded-xl p-5">
+                    <div className="mt-8 pt-6 border-t border-slate-800/60">
                       <h3 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
                         <span>🎯</span>
                         <span>Sistema de Puntuación</span>
                       </h3>
                       <p className="text-[11px] text-slate-400 mt-1">Cómo se calculan los puntos de cada partido:</p>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
-                        <div className="bg-slate-950/40 border border-emerald-500/10 rounded-xl p-3 flex flex-col justify-between">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">+5 Pts</span>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] uppercase font-bold text-slate-400">Marcador Exacto</span>
-                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">+5 Pts</span>
-                            </div>
-                            <p className="text-[11px] text-slate-400 mt-2">Acertar el marcador exacto del partido.</p>
+                            <h4 className="text-xs font-bold text-slate-350">Marcador Exacto</h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar el marcador numérico exacto.</p>
+                            <span className="text-[10px] text-emerald-500/80 block mt-1">E.g., Pred: 2-1 | Real: 2-1</span>
                           </div>
-                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 2-1 | Real 2-1</span>
                         </div>
 
-                        <div className="bg-slate-950/40 border border-amber-500/10 rounded-xl p-3 flex flex-col justify-between">
+                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">+3 Pts</span>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] uppercase font-bold text-slate-400">Resultado y Diferencia</span>
-                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">+3 Pts</span>
-                            </div>
-                            <p className="text-[11px] text-slate-400 mt-2">Acertar el ganador/empate y la diferencia de goles exacta.</p>
+                            <h4 className="text-xs font-bold text-slate-350">Resultado y Diferencia</h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar ganador/empate y la diferencia de goles.</p>
+                            <span className="text-[10px] text-amber-500/80 block mt-1">E.g., Pred: 3-1 | Real: 2-0</span>
                           </div>
-                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 3-1 | Real 2-0</span>
                         </div>
 
-                        <div className="bg-slate-950/40 border border-blue-500/10 rounded-xl p-3 flex flex-col justify-between">
+                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">+2 Pts</span>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] uppercase font-bold text-slate-400">Solo Resultado</span>
-                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">+2 Pts</span>
-                            </div>
-                            <p className="text-[11px] text-slate-400 mt-2">Acertar el ganador o empate, pero no la diferencia exacta.</p>
+                            <h4 className="text-xs font-bold text-slate-350">Solo Resultado</h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar ganador o empate con diferencia distinta.</p>
+                            <span className="text-[10px] text-blue-500/80 block mt-1">E.g., Pred: 2-1 | Real: 3-0</span>
                           </div>
-                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 2-1 | Real 3-0</span>
                         </div>
 
-                        <div className="bg-slate-950/40 border border-indigo-500/10 rounded-xl p-3 flex flex-col justify-between">
+                        <div className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">+1 Pt</span>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] uppercase font-bold text-slate-400">Marcador Parcial</span>
-                              <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">+1 Pt</span>
-                            </div>
-                            <p className="text-[11px] text-slate-400 mt-2">No acertar el resultado, pero acertar los goles de un equipo.</p>
+                            <h4 className="text-xs font-bold text-slate-350">Marcador Parcial</h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5">Acertar solo la cantidad de goles de un equipo.</p>
+                            <span className="text-[10px] text-indigo-500/80 block mt-1">E.g., Pred: 1-2 | Real: 1-0</span>
                           </div>
-                          <span className="text-[10px] text-slate-500 mt-2 block italic">Ejemplo: Pred 1-2 | Real 1-0</span>
                         </div>
                       </div>
                     </div>
