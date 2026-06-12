@@ -721,14 +721,14 @@ export default function Home() {
     if (!profile?.isAdmin) return;
     const targetUser = leaderboard.find(u => u.uid === userId);
     if (!targetUser) return;
-    
+
     if (!window.confirm(`¿Estás absolutamente seguro de eliminar al usuario "${targetUser.displayName}" (${targetUser.email})? Se borrarán sus puntos y todas sus predicciones permanentemente. (El usuario no podrá ingresar ni figurar en la polla).`)) return;
-    
+
     try {
       const batch = writeBatch(db);
       // Delete user document in users collection
       batch.delete(doc(db, "users", userId));
-      
+
       // Fetch and delete predictions of this user
       const predsSnap = await getDocs(collection(db, "predictions"));
       predsSnap.forEach((doc) => {
@@ -736,7 +736,7 @@ export default function Home() {
           batch.delete(doc.ref);
         }
       });
-      
+
       await batch.commit();
       alert(`Usuario "${targetUser.displayName}" eliminado exitosamente.`);
     } catch (err) {
@@ -920,7 +920,7 @@ export default function Home() {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Ej. Santiago Barrera"
+                  placeholder="Ej. Cristiano Ronaldo"
                   required
                   className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-slate-100 transition-colors"
                 />
@@ -2001,7 +2001,7 @@ export default function Home() {
                     <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
                       <h3 className="font-extrabold text-slate-200 text-sm">Gestionar Usuarios Registrados</h3>
                       <p className="text-slate-500 text-xs">Lista completa de participantes en la plataforma. Elimina usuarios no autorizados para quitarlos de la polla y del ranking.</p>
-                      
+
                       <div className="overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
                         <table className="w-full text-left border-collapse min-w-[400px]">
                           <thead>
