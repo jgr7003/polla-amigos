@@ -792,13 +792,31 @@ export default function Home() {
     return { stats, currentRollover: rollover };
   }, [matches, allPredictions, leaderboard]);
 
-  // Filtered leaderboard based on selected group
+  // Filtered leaderboard based on selected group and sorted by points then exact count tiebreaker
+  const userExactCounts = React.useMemo(() => {
+    const counts: { [userId: string]: number } = {};
+    allPredictions.forEach((pred) => {
+      if (pred.points === 5) {
+        counts[pred.userId] = (counts[pred.userId] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [allPredictions]);
+
   const displayedLeaderboard = React.useMemo(() => {
-    if (selectedGroupId === "global") {
-      return leaderboard;
-    }
-    return leaderboard.filter((u) => u.groupIds?.includes(selectedGroupId));
-  }, [leaderboard, selectedGroupId]);
+    const baseList = selectedGroupId === "global"
+      ? leaderboard
+      : leaderboard.filter((u) => u.groupIds?.includes(selectedGroupId));
+      
+    return [...baseList].sort((a, b) => {
+      if (b.points !== a.points) {
+        return b.points - a.points;
+      }
+      const exactA = userExactCounts[a.uid] || 0;
+      const exactB = userExactCounts[b.uid] || 0;
+      return exactB - exactA;
+    });
+  }, [leaderboard, selectedGroupId, userExactCounts]);
 
   // Unique list of rounds for filtering
   const rounds = ["Todos", "Matchday 1", "Matchday 2", "Matchday 3", "Matchday 4", "Matchday 5", "Matchday 6", "Matchday 7", "Matchday 8", "Matchday 9", "Matchday 10", "Matchday 11", "Matchday 12", "Matchday 13", "Matchday 14", "Matchday 15", "Matchday 16", "Matchday 17", "Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Match for third place", "Final"];
@@ -1321,6 +1339,10 @@ export default function Home() {
                     <span>🏆 <strong>Premios de la Polla:</strong> Al final del torneo, el pozo total recaudado se repartirá así: 1er Puesto: <strong>60%</strong> • 2do Puesto: <strong>30%</strong> • 3er Puesto: <strong>10%</strong>.</span>
                   </div>
 
+                  <div className="mt-3 bg-slate-900/40 border border-slate-900 text-slate-400 text-xs px-4 py-3 rounded-xl">
+                    <span>ℹ️ <strong>Criterio de Desempate:</strong> En caso de empate en puntos, la posición en la tabla se definirá a favor del jugador que tenga la mayor cantidad de <strong>Marcadores Exactos (5 Puntos)</strong>.</span>
+                  </div>
+
                   <div className="mt-6 overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
                     <table className="w-full text-left border-collapse min-w-[300px]">
                       <thead>
@@ -1343,7 +1365,10 @@ export default function Home() {
                                 {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
                               </td>
                               <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[150px] sm:max-w-[200px]">
-                                {userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}
+                                <div className="flex flex-col">
+                                  <span>{userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}</span>
+                                  <span className="text-[10px] text-slate-500">{(userExactCounts[userProf.uid] || 0)} Marcadores Exactos</span>
+                                </div>
                               </td>
                               <td className="py-3 sm:py-4 px-3 sm:px-6 text-right font-extrabold text-emerald-400">
                                 {userProf.points}
