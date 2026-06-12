@@ -11,7 +11,19 @@ export function calculatePoints(
   realGoals2: number
 ): number {
   if (predGoals1 === realGoals1 && predGoals2 === realGoals2) {
-    return 1;
+    return 5;
   }
+  
+  const predDiff = predGoals1 - predGoals2;
+  const realDiff = realGoals1 - realGoals2;
+  
+  if (
+    (predDiff > 0 && realDiff > 0) || // Gana equipo 1
+    (predDiff < 0 && realDiff < 0) || // Gana equipo 2
+    (predDiff === 0 && realDiff === 0)    // Empate
+  ) {
+    return 3;
+  }
+  
   return 0;
 }

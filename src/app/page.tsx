@@ -678,14 +678,6 @@ export default function Home() {
                 <span className="text-amber-400 font-bold">⭐</span>
                 <span className="font-extrabold text-emerald-400 text-sm">{profile?.points ?? 0} Pts</span>
               </div>
-
-              {user && financialStats.stats[user.uid] && (
-                <div className="hidden md:flex items-center space-x-3 bg-slate-900/60 border border-slate-800 rounded-full px-4 py-1.5 text-[11px] text-slate-350">
-                  <span>Debe aportar: <strong className="text-slate-200">${financialStats.stats[user.uid].invested} COP</strong></span>
-                  <span className="text-slate-700">|</span>
-                  <span>Premios Ganados: <strong className="text-emerald-400">${financialStats.stats[user.uid].winnings.toFixed(0)} COP</strong></span>
-                </div>
-              )}
             </div>
 
             {savedAccounts.filter(acc => acc.email !== user?.email).length > 0 && (
@@ -886,15 +878,17 @@ export default function Home() {
                               <span className="text-[10px] text-slate-500 truncate max-w-[150px]">
                                 {match.ground}
                               </span>
-
                               {hasResult ? (
                                 <div className="flex items-center space-x-2">
                                   <span className="text-xs bg-slate-950 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-lg">
                                     {match.result?.isFinal === false ? "En Vivo: " : "Final: "}{match.result?.goals1} - {match.result?.goals2}
                                   </span>
-                                  <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 1
-                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                    : "bg-slate-800 text-slate-500"
+                                  <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
+                                    (pred?.points ?? 0) === 5
+                                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                      : (pred?.points ?? 0) === 3
+                                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                      : "bg-slate-800 text-slate-500"
                                     }`}>
                                     +{pred?.points ?? 0} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                   </span>
@@ -924,48 +918,33 @@ export default function Home() {
                     <h2 className="text-xl font-extrabold text-slate-200">Tabla de Clasificación</h2>
                     <p className="text-slate-400 text-xs mt-1">Conoce a los mejores pronosticadores de la copa</p>
 
-                    {financialStats.currentRollover > 0 && (
-                      <div className="mt-4 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs px-4 py-3 rounded-xl flex items-center justify-between">
-                        <span>💰 <strong>Bolsa Acumulada:</strong> Nadie acertó el marcador exacto en el último partido. El pozo acumulado para el próximo partido es de <strong>${financialStats.currentRollover} COP</strong>.</span>
-                      </div>
-                    )}
+                    <div className="mt-4 bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-xs px-4 py-3 rounded-xl flex items-center space-x-2">
+                      <span>🏆 <strong>Premios de la Polla:</strong> Al final del torneo, el pozo total recaudado se repartirá así: 1er Puesto: <strong>60%</strong> • 2do Puesto: <strong>30%</strong> • 3er Puesto: <strong>10%</strong>.</span>
+                    </div>
 
                     <div className="mt-6 overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
-                      <table className="w-full text-left border-collapse min-w-[500px]">
+                      <table className="w-full text-left border-collapse min-w-[300px]">
                         <thead>
-                          <tr className="bg-slate-900/60 text-slate-400 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
+                          <tr className="bg-slate-900/60 text-slate-400 text-xs font-semibold uppercase tracking-wider">
                             <th className="py-3 sm:py-4 px-3 sm:px-6 text-center w-16">Pos</th>
                             <th className="py-3 sm:py-4 px-3 sm:px-6">Jugador</th>
-                            <th className="py-3 sm:py-4 px-3 sm:px-6 text-center">Apostados</th>
-                            <th className="py-3 sm:py-4 px-3 sm:px-6 text-right">Inversión</th>
-                            <th className="py-3 sm:py-4 px-3 sm:px-6 text-right">Premios</th>
                             <th className="py-3 sm:py-4 px-3 sm:px-6 text-right w-24">Puntos</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-950">
                           {leaderboard.map((userProf, index) => {
                             const isMe = userProf.uid === user.uid;
-                            const userStats = financialStats.stats[userProf.uid] || { invested: 0, winnings: 0, balance: 0, predictionsCount: 0 };
                             return (
                               <tr
                                 key={userProf.uid}
-                                className={`text-xs sm:text-sm hover:bg-slate-900/20 transition-colors ${isMe ? "bg-emerald-500/5 text-emerald-400 font-bold" : "text-slate-300"
+                                className={`text-sm hover:bg-slate-900/20 transition-colors ${isMe ? "bg-emerald-500/5 text-emerald-400 font-bold" : "text-slate-300"
                                   }`}
                               >
                                 <td className="py-3 sm:py-4 px-3 sm:px-6 text-center font-extrabold">
                                   {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
                                 </td>
-                                <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[120px] sm:max-w-[200px]">
-                                  {userProf.displayName} {isMe && <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}
-                                </td>
-                                <td className="py-3 sm:py-4 px-3 sm:px-6 text-center text-slate-400">
-                                  {userStats.predictionsCount}
-                                </td>
-                                <td className="py-3 sm:py-4 px-3 sm:px-6 text-right text-slate-400">
-                                  ${userStats.invested}
-                                </td>
-                                <td className="py-3 sm:py-4 px-3 sm:px-6 text-right text-emerald-400">
-                                  ${userStats.winnings.toFixed(0)}
+                                <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[150px] sm:max-w-[200px]">
+                                  {userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}
                                 </td>
                                 <td className="py-3 sm:py-4 px-3 sm:px-6 text-right font-extrabold text-emerald-400">
                                   {userProf.points}
@@ -1280,9 +1259,12 @@ export default function Home() {
 
                                     {/* Points Indicator if match has result */}
                                     {hasResult && pred && (
-                                      <span className={`text-xs font-bold px-2 py-1.5 rounded-lg border ${pred.points === 1
-                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                        : "bg-slate-800 text-slate-500 border-transparent"
+                                      <span className={`text-xs font-bold px-2 py-1.5 rounded-lg border ${
+                                        pred.points === 5
+                                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                          : pred.points === 3
+                                          ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                          : "bg-slate-800 text-slate-500 border-transparent"
                                         }`}>
                                         +{pred.points} Pts
                                       </span>
