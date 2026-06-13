@@ -1654,10 +1654,10 @@ export default function Home() {
                     <span>🏆 <strong>Premios de la Polla:</strong> Al final del torneo, el pozo total recaudado se repartirá así: 1er Puesto: <strong>60%</strong> • 2do Puesto: <strong>30%</strong> • 3er Puesto: <strong>10%</strong>.</span>
                   </div>
 
-                  <div className="mt-6 overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20">
+                  <div className="mt-6 max-h-[270px] overflow-y-auto overflow-x-auto rounded-xl border border-slate-950 bg-slate-950/20 scrollbar-thin">
                     <table className="w-full text-left border-collapse min-w-[300px]">
-                      <thead>
-                        <tr className="bg-slate-900/60 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+                      <thead className="sticky top-0 bg-slate-950 z-10 border-b border-slate-900">
+                        <tr className="text-slate-400 text-xs font-semibold uppercase tracking-wider">
                           <th className="py-3 sm:py-4 px-3 sm:px-6 text-center w-16">Pos</th>
                           <th className="py-3 sm:py-4 px-3 sm:px-6">Jugador</th>
                           <th className="py-3 sm:py-4 px-3 sm:px-6 text-right w-24">Puntos</th>
