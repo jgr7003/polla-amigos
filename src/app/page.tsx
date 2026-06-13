@@ -102,6 +102,14 @@ function hasMatchStarted(match: Match): boolean {
   return Date.now() >= startDate.getTime();
 }
 
+// Only hides matches from PREVIOUS days, not today's matches (even if they already started/finished)
+function isFromPreviousDay(match: Match): boolean {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const matchDate = getMatchStartDate(match);
+  return matchDate.getTime() < todayStart.getTime();
+}
+
 function formatMatchDateTimeLocal(match: Match): string {
   const date = getMatchStartDate(match);
   const day = String(date.getDate()).padStart(2, "0");
@@ -1092,12 +1100,12 @@ export default function Home() {
     : sortedMatches.filter(m => m.round === selectedRound);
 
   const pastMatchesCount = React.useMemo(() => {
-    return filteredMatches.filter(hasMatchStarted).length;
+    return filteredMatches.filter(isFromPreviousDay).length;
   }, [filteredMatches]);
 
   const userFilteredMatches = React.useMemo(() => {
     if (hidePastMatches) {
-      return filteredMatches.filter(m => !hasMatchStarted(m));
+      return filteredMatches.filter(m => !isFromPreviousDay(m));
     }
     return filteredMatches;
   }, [filteredMatches, hidePastMatches]);
