@@ -55,10 +55,26 @@ function calculatePoints(predGoals1, predGoals2, realGoals1, realGoals2) {
   return 0;
 }
 
+// Map API team names to DB canonical team names
+function mapApiTeamToDbTeam(apiTeam) {
+  if (!apiTeam) return "";
+  const clean = apiTeam.trim();
+  if (clean === "United States") return "USA";
+  if (clean === "Democratic Republic of the Congo") return "DR Congo";
+  if (clean === "Bosnia and Herzegovina") return "Bosnia & Herzegovina";
+  return clean;
+}
+
 // Clean helper to match team names (e.g. "Czech Republic" -> "czechrepublic")
 function cleanName(name) {
   if (!name) return "";
-  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  let clean = name.toLowerCase().trim();
+  if (clean === "usa" || clean === "united states") return "unitedstates";
+  if (clean === "dr congo" || clean === "democratic republic of the congo") return "democraticrepublicofthecongo";
+  
+  // Replace & with "and" before stripping other characters
+  clean = clean.replace(/&/g, "and");
+  return clean.replace(/[^a-z0-9]/g, "");
 }
 
 async function run() {
@@ -89,23 +105,50 @@ async function run() {
 
   // 4. Match and update scores
   for (const dbMatch of dbMatches) {
-    // Find matching fixture in API by English team names
-    const fixture = apiFixtures.find(f => {
-      const apiHome = f.home_team_name_en;
-      const apiAway = f.away_team_name_en;
-      return (
-        (cleanName(apiHome) === cleanName(dbMatch.team1) && cleanName(apiAway) === cleanName(dbMatch.team2)) ||
-        (cleanName(apiHome) === cleanName(dbMatch.team2) && cleanName(apiAway) === cleanName(dbMatch.team1))
-      );
-    });
+    const dbMatchIdNum = parseInt(dbMatch.id, 10);
+    let fixture = null;
+
+    if (dbMatchIdNum >= 73) {
+      // Knockout stage: match directly by ID
+      fixture = apiFixtures.find(f => parseInt(f.id, 10) === dbMatchIdNum);
+    } else {
+      // Group stage: match by team names (using robust cleanName)
+      fixture = apiFixtures.find(f => {
+        const apiHome = f.home_team_name_en;
+        const apiAway = f.away_team_name_en;
+        return (
+          (cleanName(apiHome) === cleanName(dbMatch.team1) && cleanName(apiAway) === cleanName(dbMatch.team2)) ||
+          (cleanName(apiHome) === cleanName(dbMatch.team2) && cleanName(apiAway) === cleanName(dbMatch.team1))
+        );
+      });
+    }
 
     if (!fixture) continue;
+
+    // Update team names for knockouts if determined
+    let teamNamesChanged = false;
+    let updatedTeam1 = dbMatch.team1;
+    let updatedTeam2 = dbMatch.team2;
+
+    if (dbMatchIdNum >= 73 && fixture.home_team_name_en && fixture.away_team_name_en) {
+      const mappedHome = mapApiTeamToDbTeam(fixture.home_team_name_en);
+      const mappedAway = mapApiTeamToDbTeam(fixture.away_team_name_en);
+
+      if (mappedHome !== dbMatch.team1 || mappedAway !== dbMatch.team2) {
+        updatedTeam1 = mappedHome;
+        updatedTeam2 = mappedAway;
+        teamNamesChanged = true;
+      }
+    }
 
     // In worldcup26.ir API:
     // finished is "TRUE" or "FALSE"
     // time_elapsed is "finished", "notstarted", or live indicators like "1st-half", etc.
     const isFinished = fixture.finished === "TRUE";
     const isStarted = fixture.time_elapsed !== "notstarted";
+
+    let resultChanged = false;
+    let newResult = dbMatch.result;
 
     if (isStarted || isFinished) {
       const goalsHome = parseInt(fixture.home_score, 10);
@@ -116,28 +159,45 @@ async function run() {
         let realGoals1 = goalsHome;
         let realGoals2 = goalsAway;
 
-        if (cleanName(fixture.home_team_name_en) === cleanName(dbMatch.team2)) {
+        const checkHome = fixture.home_team_name_en || fixture.home_team_label;
+        if (checkHome && cleanName(checkHome) === cleanName(dbMatch.team2)) {
           // Teams are reversed
           realGoals1 = goalsAway;
           realGoals2 = goalsHome;
         }
 
-        const currentResult = dbMatch.result;
-        const newResult = { goals1: realGoals1, goals2: realGoals2, isFinal: isFinished };
+        newResult = { goals1: realGoals1, goals2: realGoals2, isFinal: isFinished };
 
-        // Check if result changed
-        const hasChanged = !currentResult || 
+        const currentResult = dbMatch.result;
+        resultChanged = !currentResult || 
           currentResult.goals1 !== newResult.goals1 || 
           currentResult.goals2 !== newResult.goals2 || 
           currentResult.isFinal !== newResult.isFinal;
-
-        if (hasChanged) {
-          console.log(`Updating match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}): ${newResult.goals1} - ${newResult.goals2} (isFinal: ${newResult.isFinal})`);
-          await db.collection("matches").doc(dbMatch.id).update({ result: newResult });
-          updatedMatchesCount++;
-          dbMatch.result = newResult; // Update local reference for recalculation
-        }
       }
+    }
+
+    if (resultChanged || teamNamesChanged) {
+      const updateData = {};
+      if (resultChanged) {
+        updateData.result = newResult;
+      }
+      if (teamNamesChanged) {
+        updateData.team1 = updatedTeam1;
+        updateData.team2 = updatedTeam2;
+        console.log(`Updating teams for match ${dbMatch.id}: ${dbMatch.team1} vs ${dbMatch.team2} -> ${updatedTeam1} vs ${updatedTeam2}`);
+      }
+
+      if (resultChanged) {
+        console.log(`Updating result for match ${dbMatch.id} (${updatedTeam1} vs ${updatedTeam2}): ${newResult.goals1} - ${newResult.goals2} (isFinal: ${newResult.isFinal})`);
+      }
+
+      await db.collection("matches").doc(dbMatch.id).update(updateData);
+      updatedMatchesCount++;
+
+      // Update local reference for recalculation
+      dbMatch.result = newResult;
+      dbMatch.team1 = updatedTeam1;
+      dbMatch.team2 = updatedTeam2;
     }
   }
 
