@@ -348,6 +348,13 @@ export default function Home() {
     };
   }, [user, profile?.isAdmin, adminSelectedUserId]);
 
+  // Force non-superadmins to the groups sub-tab when visiting the admin panel
+  useEffect(() => {
+    if (activeTab === "admin" && !profile?.isAdmin && adminSubTab !== "groups") {
+      setAdminSubTab("groups");
+    }
+  }, [activeTab, profile?.isAdmin, adminSubTab]);
+
   // Load group query parameter on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -840,6 +847,14 @@ export default function Home() {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return;
+    const isUserGroupAdmin = profile?.isAdmin || (user && group.admins?.includes(user.uid));
+    if (!isUserGroupAdmin) {
+      alert("No tienes permisos para eliminar este grupo.");
+      return;
+    }
+
     if (!window.confirm("¿Estás seguro de eliminar este grupo? Los usuarios no serán eliminados pero ya no pertenecerán a este grupo.")) return;
     try {
       await deleteDoc(doc(db, "groups", groupId));
@@ -1364,7 +1379,7 @@ export default function Home() {
             <span>Posiciones</span>
           </button>
 
-          {(profile?.isAdmin || (user && groups.some(g => g.admins?.includes(user.uid)))) && (
+          {user && (
             <button
               onClick={() => {
                 setActiveTab("admin");
@@ -1377,8 +1392,8 @@ export default function Home() {
                 : "bg-slate-900/40 hover:bg-slate-900/80 text-slate-400 hover:text-slate-200 border-b-2 border-transparent lg:border-b-0"
                 }`}
             >
-              <span>⚙️</span>
-              <span>Administrar</span>
+              <span>👥</span>
+              <span>Grupos / Admin</span>
             </button>
           )}
         </section>
@@ -1739,7 +1754,7 @@ export default function Home() {
               )}
 
               {/* TAB: ADMIN PANEL */}
-              {activeTab === "admin" && (profile?.isAdmin || (user && groups.some(g => g.admins?.includes(user.uid)))) && (
+              {activeTab === "admin" && user && (
                 <div className="space-y-6">
                   {/* Admin Header & Sub-Tabs */}
                   <div className="bg-gradient-to-r from-amber-500/10 to-yellow-500/5 border border-amber-500/20 rounded-2xl p-5">
@@ -2220,12 +2235,18 @@ export default function Home() {
                       )}
 
                       {adminGroupSubTab === "list" && (
-                        <div className="space-y-4">
-                          <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5">
-                            <h3 className="font-extrabold text-slate-200 text-sm mb-4">Grupos Existentes</h3>
-                            {groups.length === 0 ? (
-                              <p className="text-slate-500 text-xs">No hay grupos creados todavía.</p>
-                            ) : (
+                        <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5">
+                          <h3 className="font-extrabold text-slate-200 text-sm mb-4">Grupos Existentes</h3>
+                          {(() => {
+                            const myManagedGroups = groups.filter((g) => profile?.isAdmin || (user && g.admins?.includes(user.uid)));
+                            if (myManagedGroups.length === 0) {
+                              return (
+                                <p className="text-slate-500 text-xs">
+                                  No administras ningún grupo todavía. ¡Ve a la pestaña "+ Crear Nuevo Grupo" arriba para crear tu propio grupo y jugar con tus amigos!
+                                </p>
+                              );
+                            }
+                            return (
                               <div className="overflow-x-auto">
                                 <table className="w-full text-left border-collapse">
                                   <thead>
@@ -2236,143 +2257,141 @@ export default function Home() {
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-900 text-xs text-slate-300">
-                                    {groups
-                                      .filter((g) => profile?.isAdmin || (user && g.admins?.includes(user.uid)))
-                                      .map((g) => (
-                                        <tr key={g.id} className="hover:bg-slate-900/20">
-                                          <td className="py-3 px-3 font-semibold">{g.name}</td>
-                                          <td className="py-3 px-3 text-slate-400 select-all">{g.code}</td>
-                                          <td className="py-3 px-3">
-                                            <div className="flex flex-col sm:flex-row justify-end items-end sm:items-center gap-1.5 sm:gap-2">
+                                    {myManagedGroups.map((g) => (
+                                      <tr key={g.id} className="hover:bg-slate-900/20">
+                                        <td className="py-3 px-3 font-semibold">{g.name}</td>
+                                        <td className="py-3 px-3 text-slate-400 select-all">{g.code}</td>
+                                        <td className="py-3 px-3">
+                                          <div className="flex flex-col sm:flex-row justify-end items-end sm:items-center gap-1.5 sm:gap-2">
+                                            <button
+                                              onClick={() => {
+                                                const inviteUrl = typeof window !== "undefined"
+                                                  ? `${window.location.origin}${window.location.pathname}?group=${g.code}`
+                                                  : `/?group=${g.code}`;
+                                                navigator.clipboard.writeText(inviteUrl);
+                                                alert(`Enlace de invitación para el grupo "${g.name}" copiado.`);
+                                              }}
+                                              className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-bold text-blue-400 whitespace-nowrap"
+                                            >
+                                              Copiar Enlace de invitación
+                                            </button>
+                                            <button
+                                              onClick={() => setAdminSelectedGroupId(adminSelectedGroupId === g.id ? "" : g.id)}
+                                              className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg hover:border-slate-750 text-[10px] font-bold text-slate-350 whitespace-nowrap"
+                                            >
+                                              {adminSelectedGroupId === g.id ? "Ocultar Miembros" : "Ver Miembros"}
+                                            </button>
+                                            {(profile?.isAdmin || (user && g.admins?.includes(user.uid))) && (
                                               <button
-                                                onClick={() => {
-                                                  const inviteUrl = typeof window !== "undefined"
-                                                    ? `${window.location.origin}${window.location.pathname}?group=${g.code}`
-                                                    : `/?group=${g.code}`;
-                                                  navigator.clipboard.writeText(inviteUrl);
-                                                  alert(`Enlace de invitación para el grupo "${g.name}" copiado.`);
-                                                }}
-                                                className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-[10px] font-bold text-blue-400 whitespace-nowrap"
+                                                onClick={() => handleDeleteGroup(g.id)}
+                                                className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400 whitespace-nowrap"
                                               >
-                                                Copiar Enlace
+                                                Eliminar
                                               </button>
-                                              <button
-                                                onClick={() => setAdminSelectedGroupId(adminSelectedGroupId === g.id ? "" : g.id)}
-                                                className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg hover:border-slate-700 text-[10px] font-bold text-slate-350 whitespace-nowrap"
-                                              >
-                                                {adminSelectedGroupId === g.id ? "Ocultar Miembros" : "Ver Miembros"}
-                                              </button>
-                                              {profile?.isAdmin && (
-                                                <button
-                                                  onClick={() => handleDeleteGroup(g.id)}
-                                                  className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-[10px] font-bold text-rose-400 whitespace-nowrap"
-                                                >
-                                                  Eliminar
-                                                </button>
-                                              )}
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      ))}
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    ))}
                                   </tbody>
                                 </table>
                               </div>
-                            )}
-                          </div>
-
-                          {adminSelectedGroupId && (
-                            (() => {
-                              const activeGroup = groups.find((g) => g.id === adminSelectedGroupId);
-                              const groupMembers = leaderboard.filter((u) => u.groupIds?.includes(adminSelectedGroupId));
-                              if (!activeGroup) return null;
-                              return (
-                                <div ref={membersSectionRef} className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
-                                  <div className="flex flex-col gap-3 border-b border-slate-800 pb-3">
-                                    <div>
-                                      <h3 className="font-extrabold text-slate-200 text-sm">Miembros de: {activeGroup.name}</h3>
-                                      <p className="text-slate-500 text-[10px]">Total: {groupMembers.length} jugadores</p>
-                                    </div>
-                                    <div className="flex flex-col sm:flex-row gap-2 w-full">
-                                      <select
-                                        id="add-user-select"
-                                        className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-350 text-sm rounded-lg w-full focus:outline-none focus:border-emerald-500 max-w-full"
-                                      >
-                                        <option value="">-- Agregar Jugador --</option>
-                                        {leaderboard
-                                          .filter((u) => !u.groupIds?.includes(adminSelectedGroupId))
-                                          .map((u) => (
-                                            <option key={u.uid} value={u.uid}>
-                                              {u.displayName} ({u.email})
-                                            </option>
-                                          ))}
-                                      </select>
-                                      <button
-                                        onClick={async () => {
-                                          const selectEl = document.getElementById("add-user-select") as HTMLSelectElement;
-                                          const userIdToAdd = selectEl?.value;
-                                          if (!userIdToAdd) return;
-                                          await handleAddUserToGroup(userIdToAdd, adminSelectedGroupId);
-                                          selectEl.value = "";
-                                        }}
-                                        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition-all whitespace-nowrap"
-                                      >
-                                        Agregar
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  {groupMembers.length === 0 ? (
-                                    <p className="text-slate-500 text-xs">Este grupo no tiene miembros asignados.</p>
-                                  ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                      {groupMembers.map((member) => {
-                                        const isGrpAdmin = activeGroup.admins?.includes(member.uid) ?? false;
-                                        return (
-                                          <div key={member.uid} className="flex justify-between items-center p-2.5 bg-slate-950/40 rounded-xl border border-slate-900/80">
-                                            <div className="truncate pr-2">
-                                              <p className="font-bold text-slate-250 text-xs flex items-center space-x-1.5">
-                                                <span>{member.displayName}</span>
-                                                {isGrpAdmin && (
-                                                  <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1 py-0.2 rounded font-extrabold uppercase">
-                                                    Admin
-                                                  </span>
-                                                )}
-                                              </p>
-                                              <p className="text-[10px] text-slate-500">{member.email}</p>
-                                            </div>
-                                            <div className="flex items-center space-x-1.5 shrink-0">
-                                              {isGrpAdmin ? (
-                                                <button
-                                                  onClick={() => handleDemoteFromGroupAdmin(member.uid, activeGroup.id)}
-                                                  className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-lg text-[9px] font-bold uppercase transition-colors"
-                                                >
-                                                  Quitar Admin
-                                                </button>
-                                              ) : (
-                                                <button
-                                                  onClick={() => handlePromoteToGroupAdmin(member.uid, activeGroup.id)}
-                                                  className="px-2 py-1 bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-350 rounded-lg text-[9px] font-bold uppercase transition-colors"
-                                                >
-                                                  Hacer Admin
-                                                </button>
-                                              )}
-                                              <button
-                                                onClick={() => handleRemoveUserFromGroup(member.uid, adminSelectedGroupId)}
-                                                className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/10 rounded-lg text-[9px] font-bold uppercase transition-colors"
-                                              >
-                                                Quitar
-                                              </button>
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()
-                          )}
+                            );
+                          })()}
                         </div>
+                      )}
+
+                      {adminSelectedGroupId && (
+                        (() => {
+                          const activeGroup = groups.find((g) => g.id === adminSelectedGroupId);
+                          const groupMembers = leaderboard.filter((u) => u.groupIds?.includes(adminSelectedGroupId));
+                          if (!activeGroup) return null;
+                          return (
+                            <div ref={membersSectionRef} className="bg-slate-900/40 border border-slate-900 rounded-2xl p-5 space-y-4">
+                              <div className="flex flex-col gap-3 border-b border-slate-800 pb-3">
+                                <div>
+                                  <h3 className="font-extrabold text-slate-200 text-sm">Miembros de: {activeGroup.name}</h3>
+                                  <p className="text-slate-500 text-[10px]">Total: {groupMembers.length} jugadores</p>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-2 w-full">
+                                  <select
+                                    id="add-user-select"
+                                    className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-350 text-sm rounded-lg w-full focus:outline-none focus:border-emerald-500 max-w-full"
+                                  >
+                                    <option value="">-- Agregar Jugador --</option>
+                                    {leaderboard
+                                      .filter((u) => !u.groupIds?.includes(adminSelectedGroupId))
+                                      .map((u) => (
+                                        <option key={u.uid} value={u.uid}>
+                                          {u.displayName} ({u.email})
+                                        </option>
+                                      ))}
+                                  </select>
+                                  <button
+                                    onClick={async () => {
+                                      const selectEl = document.getElementById("add-user-select") as HTMLSelectElement;
+                                      const userIdToAdd = selectEl?.value;
+                                      if (!userIdToAdd) return;
+                                      await handleAddUserToGroup(userIdToAdd, adminSelectedGroupId);
+                                      selectEl.value = "";
+                                    }}
+                                    className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition-all whitespace-nowrap"
+                                  >
+                                    Agregar
+                                  </button>
+                                </div>
+                              </div>
+
+                              {groupMembers.length === 0 ? (
+                                <p className="text-slate-500 text-xs">Este grupo no tiene miembros asignados.</p>
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {groupMembers.map((member) => {
+                                    const isGrpAdmin = activeGroup.admins?.includes(member.uid) ?? false;
+                                    return (
+                                      <div key={member.uid} className="flex justify-between items-center p-2.5 bg-slate-950/40 rounded-xl border border-slate-900/80">
+                                        <div className="truncate pr-2">
+                                          <p className="font-bold text-slate-250 text-xs flex items-center space-x-1.5">
+                                            <span>{member.displayName}</span>
+                                            {isGrpAdmin && (
+                                              <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1 py-0.2 rounded font-extrabold uppercase">
+                                                Admin
+                                              </span>
+                                            )}
+                                          </p>
+                                          <p className="text-[10px] text-slate-500">{member.email}</p>
+                                        </div>
+                                        <div className="flex items-center space-x-1.5 shrink-0">
+                                          {isGrpAdmin ? (
+                                            <button
+                                              onClick={() => handleDemoteFromGroupAdmin(member.uid, activeGroup.id)}
+                                              className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-lg text-[9px] font-bold uppercase transition-colors"
+                                            >
+                                              Quitar Admin
+                                            </button>
+                                          ) : (
+                                            <button
+                                              onClick={() => handlePromoteToGroupAdmin(member.uid, activeGroup.id)}
+                                              className="px-2 py-1 bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-350 rounded-lg text-[9px] font-bold uppercase transition-colors"
+                                            >
+                                              Hacer Admin
+                                            </button>
+                                          )}
+                                          <button
+                                            onClick={() => handleRemoveUserFromGroup(member.uid, adminSelectedGroupId)}
+                                            className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/10 rounded-lg text-[9px] font-bold uppercase transition-colors"
+                                          >
+                                            Quitar
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()
                       )}
                     </div>
                   )}
