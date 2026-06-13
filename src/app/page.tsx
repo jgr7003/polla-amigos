@@ -1419,7 +1419,7 @@ export default function Home() {
         <section className="w-full lg:w-64 flex flex-row lg:flex-col gap-2 pb-2 lg:pb-0 shrink-0 lg:h-fit">
           <button
             onClick={() => setActiveTab("matches")}
-            className={`flex-1 lg:flex-none lg:w-full px-4 py-3 rounded-xl font-bold text-sm text-center lg:text-left flex items-center justify-center lg:justify-start space-x-2.5 transition-all shrink-0 ${activeTab === "matches"
+            className={`flex-1 lg:flex-none lg:w-full px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap text-center lg:text-left flex items-center justify-center lg:justify-start space-x-2 transition-all shrink-0 ${activeTab === "matches"
               ? "bg-gradient-to-r from-emerald-500/20 to-teal-500/10 border-b-2 lg:border-b-0 lg:border-l-4 border-emerald-500 text-emerald-400"
               : "bg-slate-900/40 hover:bg-slate-900/80 text-slate-400 hover:text-slate-200 border-b-2 border-transparent lg:border-b-0"
               }`}
@@ -1430,7 +1430,7 @@ export default function Home() {
 
           <button
             onClick={() => setActiveTab("leaderboard")}
-            className={`flex-1 lg:flex-none lg:w-full px-4 py-3 rounded-xl font-bold text-sm text-center lg:text-left flex items-center justify-center lg:justify-start space-x-2.5 transition-all shrink-0 ${activeTab === "leaderboard"
+            className={`flex-1 lg:flex-none lg:w-full px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap text-center lg:text-left flex items-center justify-center lg:justify-start space-x-2 transition-all shrink-0 ${activeTab === "leaderboard"
               ? "bg-gradient-to-r from-emerald-500/20 to-teal-500/10 border-b-2 lg:border-b-0 lg:border-l-4 border-emerald-500 text-emerald-400"
               : "bg-slate-900/40 hover:bg-slate-900/80 text-slate-400 hover:text-slate-200 border-b-2 border-transparent lg:border-b-0"
               }`}
@@ -1447,7 +1447,7 @@ export default function Home() {
                   setAdminSubTab("groups");
                 }
               }}
-              className={`flex-1 lg:flex-none lg:w-full px-4 py-3 rounded-xl font-bold text-sm text-center lg:text-left flex items-center justify-center lg:justify-start space-x-2.5 transition-all shrink-0 ${activeTab === "admin"
+              className={`flex-1 lg:flex-none lg:w-full px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap text-center lg:text-left flex items-center justify-center lg:justify-start space-x-2 transition-all shrink-0 ${activeTab === "admin"
                 ? "bg-gradient-to-r from-amber-500/20 to-yellow-500/10 border-b-2 lg:border-b-0 lg:border-l-4 border-amber-500 text-amber-400"
                 : "bg-slate-900/40 hover:bg-slate-900/80 text-slate-400 hover:text-slate-200 border-b-2 border-transparent lg:border-b-0"
                 }`}
