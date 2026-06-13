@@ -247,7 +247,7 @@ export default function Home() {
         }
       });
       setMatches(list);
-      setAdminResults((prev) => ({ ...adminDrafts, ...prev }));
+      setAdminResults((prev) => ({ ...prev, ...adminDrafts }));
     });
 
     // 2. Sync Current User's Predictions
