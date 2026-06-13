@@ -1,8 +1,10 @@
 /**
  * Calcula los puntos ganados para una predicción del mundial
- * - 3 puntos si acierta el marcador exacto
- * - 1 punto si acierta el ganador o el empate (sin marcador exacto)
- * - 0 puntos si no acierta el resultado
+ * - 5 puntos: Marcador Exacto (Marcador exacto del partido)
+ * - 3 puntos: Resultado y Diferencia (Solo para ganador, si coincide la diferencia)
+ * - 2 puntos: Solo Resultado (Ganador o empate no exacto)
+ * - 1 punto: Marcador Parcial (Acierta goles de un solo equipo)
+ * - 0 puntos: Si no cumple ninguno de los anteriores
  */
 export function calculatePoints(
   predGoals1: number,
@@ -23,12 +25,13 @@ export function calculatePoints(
     (predDiff < 0 && realDiff < 0) || // Gana equipo 2
     (predDiff === 0 && realDiff === 0);   // Empate
   
-  // 2. Resultado Exacto con Diferencia de Goles (3 Puntos)
-  if (correctOutcome && predDiff === realDiff) {
+  // 2. Resultado y Diferencia - Solo para Ganador (3 Puntos)
+  // (Aplica si hay ganador y la diferencia coincide. Se excluye el empate de esta regla)
+  if (correctOutcome && predDiff !== 0 && predDiff === realDiff) {
     return 3;
   }
   
-  // 3. Acierto de Resultado (2 Puntos)
+  // 3. Solo Resultado - Ganador o Empate (2 Puntos)
   if (correctOutcome) {
     return 2;
   }

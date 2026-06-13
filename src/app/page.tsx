@@ -1820,25 +1820,25 @@ export default function Home() {
                         <div>
                           <h4 className="text-sm font-bold text-slate-300">Marcador Exacto</h4>
                           <p className="text-xs text-slate-500 mt-0.5">Acertar el marcador numérico exacto.</p>
-                          <span className="text-[11px] text-emerald-500/80 block mt-1">E.g., Pred: 2-1 | Real: 2-1</span>
+                          <span className="text-[11px] text-emerald-500/80 block mt-1">E.g., Pred: 2-1 | Real: 2-1 (o Pred: 1-1 | Real: 1-1)</span>
                         </div>
                       </div>
 
                       <div className="flex items-start space-x-3 p-5 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
                         <span className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">+3 Pts</span>
                         <div>
-                          <h4 className="text-sm font-bold text-slate-300">Resultado y Diferencia</h4>
-                          <p className="text-xs text-slate-500 mt-0.5">Acertar ganador/empate y la diferencia de goles.</p>
-                          <span className="text-[11px] text-amber-500/80 block mt-1">E.g., Pred: 3-1 | Real: 2-0</span>
+                          <h4 className="text-sm font-bold text-slate-300">Resultado y Diferencia (Solo Ganador)</h4>
+                          <p className="text-xs text-slate-500 mt-0.5">Acertar ganador y la diferencia de goles. No aplica en empates.</p>
+                          <span className="text-[11px] text-amber-500/80 block mt-1">E.g., Pred: 2-1 (+1) | Real: 3-2 (+1)</span>
                         </div>
                       </div>
 
                       <div className="flex items-start space-x-3 p-5 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
                         <span className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">+2 Pts</span>
                         <div>
-                          <h4 className="text-sm font-bold text-slate-300">Solo Resultado</h4>
-                          <p className="text-xs text-slate-500 mt-0.5">Acertar ganador o empate con diferencia distinta.</p>
-                          <span className="text-[11px] text-blue-500/80 block mt-1">E.g., Pred: 2-1 | Real: 3-0</span>
+                          <h4 className="text-sm font-bold text-slate-300">Solo Resultado (Ganador o Empate)</h4>
+                          <p className="text-xs text-slate-500 mt-0.5">Cualquier empate no exacto, o ganador con diferente diferencia.</p>
+                          <span className="text-[11px] text-blue-500/80 block mt-1">E.g., Pred: 1-1 | Real: 2-2 (o Pred: 2-0 | Real: 2-1)</span>
                         </div>
                       </div>
 
@@ -1846,7 +1846,7 @@ export default function Home() {
                         <span className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">+1 Pt</span>
                         <div>
                           <h4 className="text-sm font-bold text-slate-300">Marcador Parcial</h4>
-                          <p className="text-xs text-slate-500 mt-0.5">Acertar solo la cantidad de goles de un equipo.</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Acertar solo los goles de un equipo (cuando no se acierta el resultado).</p>
                           <span className="text-[11px] text-indigo-500/80 block mt-1">E.g., Pred: 1-2 | Real: 1-0</span>
                         </div>
                       </div>
