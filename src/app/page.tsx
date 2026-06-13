@@ -190,6 +190,12 @@ export default function Home() {
   const [isJoining, setIsJoining] = useState(false);
   const [adminSelectedGroupId, setAdminSelectedGroupId] = useState<string>("");
 
+  // User profile edit states
+  const [showNameRestoreModal, setShowNameRestoreModal] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [updatingOwnName, setUpdatingOwnName] = useState(false);
+  const [isManualEditName, setIsManualEditName] = useState(false);
+
   // Auth Handler
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -306,6 +312,8 @@ export default function Home() {
       unsubGroups();
     };
   }, [user]);
+
+
 
   // Sync selected user's predictions for admin edit
   useEffect(() => {
@@ -550,7 +558,9 @@ export default function Home() {
       // Update users collection
       const userBatch = writeBatch(db);
       Object.keys(userPointsMap).forEach((uid) => {
-        userBatch.update(doc(db, "users", uid), { points: userPointsMap[uid] });
+        if (uid && uid !== "undefined") {
+          userBatch.set(doc(db, "users", uid), { points: userPointsMap[uid] }, { merge: true });
+        }
       });
       await userBatch.commit();
 
@@ -603,8 +613,10 @@ export default function Home() {
       const usersSnap = await getDocs(collection(db, "users"));
       usersSnap.forEach(uDoc => {
         const uid = uDoc.id;
-        const pts = userPointsMap[uid] || 0;
-        batch.update(doc(db, "users", uid), { points: pts });
+        if (uid && uid !== "undefined") {
+          const pts = userPointsMap[uid] || 0;
+          batch.set(doc(db, "users", uid), { points: pts }, { merge: true });
+        }
       });
 
       await batch.commit();
@@ -719,9 +731,9 @@ export default function Home() {
             newResult = { goals1: realGoals1, goals2: realGoals2, isFinal: isFinished };
 
             const currentResult = dbMatch.result;
-            resultChanged = !currentResult || 
-              currentResult.goals1 !== newResult.goals1 || 
-              currentResult.goals2 !== newResult.goals2 || 
+            resultChanged = !currentResult ||
+              currentResult.goals1 !== newResult.goals1 ||
+              currentResult.goals2 !== newResult.goals2 ||
               currentResult.isFinal !== newResult.isFinal;
           }
         }
@@ -737,7 +749,7 @@ export default function Home() {
           }
           batch.update(doc(db, "matches", dbMatch.id), updateData);
           updatedMatchesCount++;
-          
+
           // Actualizar temporalmente para el cálculo de abajo
           dbMatch.result = newResult;
           dbMatch.team1 = updatedTeam1;
@@ -778,8 +790,10 @@ export default function Home() {
         const usersSnap = await getDocs(collection(db, "users"));
         usersSnap.forEach(uDoc => {
           const uid = uDoc.id;
-          const pts = userPointsMap[uid] || 0;
-          batch.update(doc(db, "users", uid), { points: pts });
+          if (uid && uid !== "undefined") {
+            const pts = userPointsMap[uid] || 0;
+            batch.set(doc(db, "users", uid), { points: pts }, { merge: true });
+          }
         });
 
         await batch.commit();
@@ -832,8 +846,10 @@ export default function Home() {
       const usersToUpdate = leaderboard.filter(u => u.groupIds?.includes(groupId));
       const batch = writeBatch(db);
       usersToUpdate.forEach(u => {
-        const newGroupIds = u.groupIds?.filter(id => id !== groupId) || [];
-        batch.update(doc(db, "users", u.uid), { groupIds: newGroupIds });
+        if (u.uid && u.uid !== "undefined") {
+          const newGroupIds = u.groupIds?.filter(id => id !== groupId) || [];
+          batch.set(doc(db, "users", u.uid), { groupIds: newGroupIds }, { merge: true });
+        }
       });
       await batch.commit();
       if (adminSelectedGroupId === groupId) {
@@ -937,6 +953,28 @@ export default function Home() {
     } catch (err) {
       console.error("Error deleting user:", err);
       alert("Error al eliminar el usuario.");
+    }
+  };
+
+  const handleEditUserDisplayName = async (userId: string) => {
+    if (!profile?.isAdmin) return;
+    const targetUser = leaderboard.find(u => u.uid === userId);
+    if (!targetUser) return;
+
+    const newName = window.prompt(`Ingresa el nuevo nombre para el usuario "${targetUser.displayName}":`, targetUser.displayName);
+    if (newName === null) return; // User cancelled
+    const cleanName = newName.trim();
+    if (!cleanName) {
+      alert("El nombre no puede estar vacío.");
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, "users", userId), { displayName: cleanName }, { merge: true });
+      alert(`Nombre del usuario actualizado a "${cleanName}" exitosamente.`);
+    } catch (err) {
+      console.error("Error updating display name:", err);
+      alert("Error al actualizar el nombre del usuario.");
     }
   };
 
@@ -1239,8 +1277,23 @@ export default function Home() {
 
           <div className="flex items-center space-x-4">
             <div className="hidden sm:flex flex-col text-right">
-              <span className="text-xs text-slate-400">Jugador</span>
-              <span className="font-semibold text-slate-200">{profile?.displayName}</span>
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Jugador</span>
+              <div className="flex items-center justify-end space-x-1.5">
+                <span className="font-semibold text-slate-200">{profile?.displayName}</span>
+                <button
+                  onClick={() => {
+                    if (profile) {
+                      setNewDisplayName(profile.displayName || "");
+                      setIsManualEditName(true);
+                      setShowNameRestoreModal(true);
+                    }
+                  }}
+                  title="Editar mi nombre"
+                  className="text-[10px] text-slate-500 hover:text-emerald-400 transition-colors focus:outline-none"
+                >
+                  ✏️
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center space-x-2">
@@ -1608,7 +1661,23 @@ export default function Home() {
                                 {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
                               </td>
                               <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[150px] sm:max-w-[200px]">
-                                {userProf.displayName} {isMe && <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded ml-2">Tú</span>}
+                                <span className="align-middle">{userProf.displayName}</span>
+                                {isMe && (
+                                  <span className="inline-flex items-center ml-2 space-x-1.5 align-middle">
+                                    <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">Tú</span>
+                                    <button
+                                      onClick={() => {
+                                        setNewDisplayName(profile?.displayName || "");
+                                        setIsManualEditName(true);
+                                        setShowNameRestoreModal(true);
+                                      }}
+                                      title="Editar mi nombre"
+                                      className="text-xs text-slate-500 hover:text-emerald-400 transition-colors focus:outline-none"
+                                    >
+                                      ✏️
+                                    </button>
+                                  </span>
+                                )}
                               </td>
                               <td className="py-3 sm:py-4 px-3 sm:px-6 text-right font-extrabold text-emerald-400">
                                 {userProf.points}
@@ -1793,7 +1862,7 @@ export default function Home() {
                                 {group.matches.map((match) => {
                                   const draft = adminResults[match.id] || { goals1: "", goals2: "" };
                                   const isSaving = adminSaving[match.id];
-                                  
+
                                   const matchDate = getMatchStartDate(match);
                                   const localTimeStr = matchDate.toLocaleTimeString(undefined, {
                                     hour: '2-digit',
@@ -1803,7 +1872,7 @@ export default function Home() {
                                   const tzAbbr = getTzAbbreviation();
 
                                   return (
-                                    <div 
+                                    <div
                                       key={match.id}
                                       className="bg-slate-900/40 border border-slate-900/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
                                     >
@@ -1811,9 +1880,9 @@ export default function Home() {
                                         <span className="text-xs text-amber-500 font-semibold">{match.round} • Partido {match.num}</span>
                                         <h3 className="font-bold text-slate-200 mt-0.5 flex items-center space-x-2">
                                           {getFlagUrl(match.team1) && (
-                                            <img 
-                                              src={getFlagUrl(match.team1)!} 
-                                              alt={match.team1} 
+                                            <img
+                                              src={getFlagUrl(match.team1)!}
+                                              alt={match.team1}
                                               className="w-5 h-3.5 object-cover rounded-sm shadow-sm border border-slate-900"
                                             />
                                           )}
@@ -1821,9 +1890,9 @@ export default function Home() {
                                           <span className="text-slate-500 font-semibold text-xs">vs</span>
                                           <span>{match.team2}</span>
                                           {getFlagUrl(match.team2) && (
-                                            <img 
-                                              src={getFlagUrl(match.team2)!} 
-                                              alt={match.team2} 
+                                            <img
+                                              src={getFlagUrl(match.team2)!}
+                                              alt={match.team2}
                                               className="w-5 h-3.5 object-cover rounded-sm shadow-sm border border-slate-900"
                                             />
                                           )}
@@ -1978,7 +2047,7 @@ export default function Home() {
                                     const tzAbbr = getTzAbbreviation();
 
                                     return (
-                                      <div 
+                                      <div
                                         key={match.id}
                                         className="bg-slate-900/40 border border-slate-900/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
                                       >
@@ -1987,9 +2056,9 @@ export default function Home() {
                                           <span className="text-xs text-amber-500 font-semibold">{match.round} • Partido {match.num}</span>
                                           <h3 className="font-bold text-slate-200 mt-0.5 flex items-center space-x-2">
                                             {getFlagUrl(match.team1) && (
-                                              <img 
-                                                src={getFlagUrl(match.team1)!} 
-                                                alt={match.team1} 
+                                              <img
+                                                src={getFlagUrl(match.team1)!}
+                                                alt={match.team1}
                                                 className="w-5 h-3.5 object-cover rounded-sm shadow-sm border border-slate-900"
                                               />
                                             )}
@@ -1997,9 +2066,9 @@ export default function Home() {
                                             <span className="text-slate-500 font-semibold text-xs">vs</span>
                                             <span>{match.team2}</span>
                                             {getFlagUrl(match.team2) && (
-                                              <img 
-                                                src={getFlagUrl(match.team2)!} 
-                                                alt={match.team2} 
+                                              <img
+                                                src={getFlagUrl(match.team2)!}
+                                                alt={match.team2}
                                                 className="w-5 h-3.5 object-cover rounded-sm shadow-sm border border-slate-900"
                                               />
                                             )}
@@ -2331,7 +2400,13 @@ export default function Home() {
                                   <td className="py-3 px-4 font-bold">{u.displayName} {isMe && "(Tú)"}</td>
                                   <td className="py-3 px-4 text-slate-450">{u.email}</td>
                                   <td className="py-3 px-4 text-center font-extrabold text-emerald-400">{u.points}</td>
-                                  <td className="py-3 px-4 text-right">
+                                  <td className="py-3 px-4 text-right space-x-2">
+                                    <button
+                                      onClick={() => handleEditUserDisplayName(u.uid)}
+                                      className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-lg text-[10px] font-bold text-indigo-400 uppercase tracking-wide transition-all"
+                                    >
+                                      Editar Nombre
+                                    </button>
                                     <button
                                       onClick={() => handleForceDeleteUser(u.uid)}
                                       disabled={isMe}
@@ -2354,6 +2429,79 @@ export default function Home() {
           )}
         </section>
       </main>
+
+      {/* Modal de Disculpas y Actualización de Nombre */}
+      {showNameRestoreModal && (
+        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 pt-20 sm:pt-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="text-center space-y-2">
+              <span className="text-4xl">{isManualEditName ? "👤" : "🙏"}</span>
+              <h2 className="text-xl font-black text-slate-100 bg-gradient-to-r from-emerald-400 to-amber-300 bg-clip-text text-transparent">
+                {isManualEditName ? "Editar mi Nombre" : "¡Mil Disculpas!"}
+              </h2>
+              <p className="text-xs text-slate-350 leading-relaxed">
+                {isManualEditName
+                  ? "Actualiza tu nombre de pantalla para que aparezca correctamente en la clasificación."
+                  : "Debido a una actualización del sistema, de forma temporal se restablecieron algunos nombres en pantalla y se asignó tu correo."}
+              </p>
+              {!isManualEditName && (
+                <p className="text-xs text-emerald-400 font-bold">
+                  Te invitamos a escribir tu nombre real abajo para que todos te reconozcan en la tabla de clasificación.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tu Nombre de Pantalla</label>
+              <input
+                type="text"
+                value={newDisplayName}
+                onChange={(e) => setNewDisplayName(e.target.value)}
+                placeholder="Ej: Juan Pérez"
+                className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-slate-100 text-xs transition-colors"
+              />
+            </div>
+
+            <div className="flex space-x-3 pt-2">
+              <button
+                onClick={() => {
+                  localStorage.setItem("polla_name_restore_alert_shown", "true");
+                  setShowNameRestoreModal(false);
+                }}
+                className="flex-1 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold rounded-xl text-xs transition-all"
+              >
+                {isManualEditName ? "Cancelar" : "Omitir"}
+              </button>
+              <button
+                onClick={async () => {
+                  const clean = newDisplayName.trim();
+                  if (!clean) {
+                    alert("El nombre no puede estar vacío.");
+                    return;
+                  }
+                  setUpdatingOwnName(true);
+                  try {
+                    if (user) {
+                      await setDoc(doc(db, "users", user.uid), { displayName: clean }, { merge: true });
+                      localStorage.setItem("polla_name_restore_alert_shown", "true");
+                      setShowNameRestoreModal(false);
+                    }
+                  } catch (err) {
+                    console.error(err);
+                    alert("Error al actualizar tu nombre.");
+                  } finally {
+                    setUpdatingOwnName(false);
+                  }
+                }}
+                disabled={updatingOwnName}
+                className="flex-[2] py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold rounded-xl text-xs transition-all disabled:opacity-50 flex items-center justify-center"
+              >
+                {updatingOwnName ? "Guardando..." : "Guardar Nombre"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
