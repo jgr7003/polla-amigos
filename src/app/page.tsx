@@ -112,6 +112,18 @@ function formatMatchDateTimeLocal(match: Match): string {
   return `${day}/${month}/${year} • ${hours}:${minutes}`;
 }
 
+function formatRoundName(round: string): string {
+  if (!round) return "";
+  return round
+    .replace(/Matchday\s+(\d+)/gi, "Día $1")
+    .replace(/Round of 32/gi, "Ronda de 32")
+    .replace(/Round of 16/gi, "Octavos")
+    .replace(/Quarter-final/gi, "Cuartos")
+    .replace(/Semi-final/gi, "Semifinal")
+    .replace(/Match for third place/gi, "Tercer Puesto")
+    .replace(/Final/gi, "Final");
+}
+
 const getTzAbbreviation = () => {
   try {
     return Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
@@ -163,6 +175,7 @@ export default function Home() {
 
   // Filter & prediction draft inputs
   const [selectedRound, setSelectedRound] = useState<string>("Todos");
+  const [hidePastMatches, setHidePastMatches] = useState(true);
   const [predictionDrafts, setPredictionDrafts] = useState<{ [matchId: string]: { goals1: string; goals2: string } }>({});
   const [savingMatches, setSavingMatches] = useState<{ [matchId: string]: boolean }>({});
 
@@ -1078,6 +1091,53 @@ export default function Home() {
     ? sortedMatches
     : sortedMatches.filter(m => m.round === selectedRound);
 
+  const pastMatchesCount = React.useMemo(() => {
+    return filteredMatches.filter(hasMatchStarted).length;
+  }, [filteredMatches]);
+
+  const userFilteredMatches = React.useMemo(() => {
+    if (hidePastMatches) {
+      return filteredMatches.filter(m => !hasMatchStarted(m));
+    }
+    return filteredMatches;
+  }, [filteredMatches, hidePastMatches]);
+
+  const userGroupedMatches = React.useMemo(() => {
+    const sorted = [...userFilteredMatches].sort((a, b) => {
+      const dateA = getMatchStartDate(a).getTime();
+      const dateB = getMatchStartDate(b).getTime();
+      if (dateA !== dateB) {
+        return dateA - dateB;
+      }
+      return a.num - b.num;
+    });
+
+    const groups: { [key: string]: Match[] } = {};
+    const groupOrder: string[] = [];
+
+    sorted.forEach((match) => {
+      const matchDate = getMatchStartDate(match);
+      const label = capitalizeFirstLetter(
+        matchDate.toLocaleDateString(undefined, {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric"
+        })
+      );
+      if (!groups[label]) {
+        groups[label] = [];
+        groupOrder.push(label);
+      }
+      groups[label].push(match);
+    });
+
+    return groupOrder.map(label => ({
+      dateLabel: label,
+      matches: groups[label]
+    }));
+  }, [userFilteredMatches]);
+
   const groupedMatches = React.useMemo(() => {
     const sorted = [...filteredMatches].sort((a, b) => {
       const dateA = getMatchStartDate(a).getTime();
@@ -1411,31 +1471,65 @@ export default function Home() {
               {activeTab === "matches" && (
                 <div className="space-y-6">
                   {/* Round Filter */}
-                  <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="bg-slate-900/40 border border-slate-900 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-xl font-extrabold text-slate-200">Calendario Oficial</h2>
-                      <p className="text-slate-400 text-xs">Completa tus predicciones de los 104 partidos del Mundial</p>
+                      <h2 className="text-base font-extrabold text-slate-200">Calendario Oficial</h2>
+                      <p className="text-slate-400 text-[11px]">Completa tus predicciones del Mundial</p>
                     </div>
 
-                    <select
-                      value={selectedRound}
-                      onChange={(e) => setSelectedRound(e.target.value)}
-                      className="px-4 py-2 bg-slate-950 border border-slate-800 text-slate-300 text-sm rounded-xl focus:outline-none focus:border-emerald-500"
-                    >
-                      {rounds.map((round) => (
-                        <option key={round} value={round}>{round}</option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-2 w-full sm:w-auto justify-start sm:justify-end">
+                      {pastMatchesCount > 0 && (
+                        <button
+                          onClick={() => setHidePastMatches(!hidePastMatches)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 shrink-0 ${hidePastMatches
+                            ? "bg-emerald-950/30 text-emerald-400 border-emerald-900/40 hover:bg-emerald-900/20"
+                            : "bg-slate-900/60 text-slate-300 border-slate-800 hover:bg-slate-800"
+                            }`}
+                        >
+                          {hidePastMatches ? (
+                            <>
+                              <span className="mr-1">👁️</span> {pastMatchesCount} pasados
+                            </>
+                          ) : (
+                            <>
+                              <span>🙈</span> Ocultar
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      <select
+                        value={selectedRound}
+                        onChange={(e) => setSelectedRound(e.target.value)}
+                        className="px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-xl focus:outline-none focus:border-emerald-500 w-full sm:w-auto"
+                      >
+                        {rounds.map((round) => (
+                          <option key={round} value={round}>{formatRoundName(round)}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {/* Matches Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {groupedMatches.length === 0 ? (
-                      <div className="col-span-full py-12 text-center text-slate-500">
-                        No se encontraron partidos para esta ronda.
+                    {userGroupedMatches.length === 0 ? (
+                      <div className="col-span-full py-12 text-center text-slate-500 bg-slate-900/10 border border-slate-900/40 rounded-2xl p-6">
+                        {pastMatchesCount > 0 && hidePastMatches ? (
+                          <>
+                            <p className="text-slate-400 text-sm mb-3">Todos los partidos de esta ronda ya comenzaron o finalizaron.</p>
+                            <button
+                              onClick={() => setHidePastMatches(false)}
+                              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-extrabold rounded-xl transition-colors shadow-lg shadow-emerald-500/20"
+                            >
+                              Ver partidos pasados
+                            </button>
+                          </>
+                        ) : (
+                          "No se encontraron partidos para esta ronda."
+                        )}
                       </div>
                     ) : (
-                      groupedMatches.map((group) => (
+                      userGroupedMatches.map((group) => (
                         <React.Fragment key={group.dateLabel}>
                           {/* Day Header */}
                           <div className="col-span-full mt-6 first:mt-0 mb-2">
@@ -1469,7 +1563,7 @@ export default function Home() {
                               >
                                 {/* Match Header */}
                                 <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4">
-                                  <span className="font-bold text-emerald-500">{match.round} {match.group ? `• ${match.group}` : ""}</span>
+                                  <span className="font-bold text-emerald-500">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
                                   <span className="font-semibold text-slate-300">{localTimeStr} {tzAbbr}</span>
                                 </div>
 
@@ -1850,7 +1944,7 @@ export default function Home() {
                           className="px-4 py-2 bg-slate-950 border border-slate-800 text-slate-300 text-sm rounded-xl focus:outline-none focus:border-amber-500"
                         >
                           {rounds.map((round) => (
-                            <option key={round} value={round}>{round}</option>
+                            <option key={round} value={round}>{formatRoundName(round)}</option>
                           ))}
                         </select>
                       </div>
@@ -1892,7 +1986,7 @@ export default function Home() {
                                       className="bg-slate-900/40 border border-slate-900/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
                                     >
                                       <div className="flex-1">
-                                        <span className="text-xs text-amber-500 font-semibold">{match.round} • Partido {match.num}</span>
+                                        <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
                                         <h3 className="font-bold text-slate-200 mt-0.5 flex items-center space-x-2">
                                           {getFlagUrl(match.team1) && (
                                             <img
@@ -2015,7 +2109,7 @@ export default function Home() {
                             className="w-full md:w-64 px-4 py-2.5 bg-slate-950 border border-slate-800 text-slate-300 text-sm rounded-xl focus:outline-none focus:border-amber-500"
                           >
                             {rounds.map((round) => (
-                              <option key={round} value={round}>{round}</option>
+                              <option key={round} value={round}>{formatRoundName(round)}</option>
                             ))}
                           </select>
                         </div>
@@ -2068,7 +2162,7 @@ export default function Home() {
                                       >
                                         {/* Match Team Info */}
                                         <div className="flex-1">
-                                          <span className="text-xs text-amber-500 font-semibold">{match.round} • Partido {match.num}</span>
+                                          <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
                                           <h3 className="font-bold text-slate-200 mt-0.5 flex items-center space-x-2">
                                             {getFlagUrl(match.team1) && (
                                               <img
