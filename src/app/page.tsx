@@ -1814,7 +1814,7 @@ export default function Home() {
                     </h3>
                     <p className="text-xs text-slate-400 mt-1">Cómo se calculan los puntos de cada partido:</p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
                       <div className="flex items-start space-x-3 p-5 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
                         <span className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">+5 Pts</span>
                         <div>
@@ -1827,18 +1827,9 @@ export default function Home() {
                       <div className="flex items-start space-x-3 p-5 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
                         <span className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">+3 Pts</span>
                         <div>
-                          <h4 className="text-sm font-bold text-slate-300">Resultado y Diferencia (Solo Ganador)</h4>
-                          <p className="text-xs text-slate-500 mt-0.5">Acertar ganador y la diferencia de goles. No aplica en empates.</p>
-                          <span className="text-[11px] text-amber-500/80 block mt-1">E.g., Pred: 2-1 (+1) | Real: 3-2 (+1)</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start space-x-3 p-5 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
-                        <span className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">+2 Pts</span>
-                        <div>
-                          <h4 className="text-sm font-bold text-slate-300">Solo Resultado (Ganador o Empate)</h4>
-                          <p className="text-xs text-slate-500 mt-0.5">Cualquier empate no exacto, o ganador con diferente diferencia.</p>
-                          <span className="text-[11px] text-blue-500/80 block mt-1">E.g., Pred: 1-1 | Real: 2-2 (o Pred: 2-0 | Real: 2-1)</span>
+                          <h4 className="text-sm font-bold text-slate-300">Resultado (Ganador o Empate)</h4>
+                          <p className="text-xs text-slate-500 mt-0.5">Acertar ganador o empate sin marcador exacto.</p>
+                          <span className="text-[11px] text-amber-500/80 block mt-1">E.g., Pred: 2-1 | Real: 3-1 (o Pred: 1-1 | Real: 2-2)</span>
                         </div>
                       </div>
 

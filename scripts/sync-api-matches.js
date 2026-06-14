@@ -37,17 +37,12 @@ function calculatePoints(predGoals1, predGoals2, realGoals1, realGoals2) {
     (predDiff < 0 && realDiff < 0) || // Gana equipo 2
     (predDiff === 0 && realDiff === 0);   // Empate
   
-  // 2. Resultado Exacto con Diferencia de Goles (3 Puntos)
-  if (correctOutcome && predDiff === realDiff) {
+  // 2. Acierto de Resultado (3 Puntos)
+  if (correctOutcome) {
     return 3;
   }
   
-  // 3. Acierto de Resultado (2 Puntos)
-  if (correctOutcome) {
-    return 2;
-  }
-  
-  // 4. Marcador Parcial (1 Punto)
+  // 3. Marcador Parcial (1 Punto)
   if (predGoals1 === realGoals1 || predGoals2 === realGoals2) {
     return 1;
   }
