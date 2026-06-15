@@ -229,7 +229,10 @@ async function run() {
       if (!userPointsMap[pred.userId]) {
         userPointsMap[pred.userId] = 0;
       }
-      userPointsMap[pred.userId] += pts;
+      const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
+      if (isFinal) {
+        userPointsMap[pred.userId] += pts;
+      }
     });
 
     // Update user profile points

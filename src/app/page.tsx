@@ -481,7 +481,11 @@ export default function Home() {
       allPredsSnap.forEach((pDoc) => {
         const pred = pDoc.data() as Prediction;
         if (pred.userId === adminSelectedUserId) {
-          totalPoints += pred.points || 0;
+          const match = matches.find(m => m.id === pred.matchId);
+          const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
+          if (isFinal) {
+            totalPoints += pred.points || 0;
+          }
         }
       });
 
@@ -581,7 +585,18 @@ export default function Home() {
         if (!userPointsMap[pred.userId]) {
           userPointsMap[pred.userId] = 0;
         }
-        userPointsMap[pred.userId] += pred.points || 0;
+        
+        let isFinal = false;
+        if (pred.matchId === matchId) {
+          isFinal = draft.isFinal ?? true;
+        } else {
+          const match = matches.find(m => m.id === pred.matchId);
+          isFinal = match?.result ? (match.result.isFinal ?? true) : false;
+        }
+
+        if (isFinal) {
+          userPointsMap[pred.userId] += pred.points || 0;
+        }
       });
 
       // Update users collection
@@ -636,7 +651,11 @@ export default function Home() {
         if (!userPointsMap[pred.userId]) {
           userPointsMap[pred.userId] = 0;
         }
-        userPointsMap[pred.userId] += pts;
+        
+        const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
+        if (isFinal) {
+          userPointsMap[pred.userId] += pts;
+        }
       });
 
       const usersSnap = await getDocs(collection(db, "users"));
@@ -812,7 +831,11 @@ export default function Home() {
           if (!userPointsMap[pred.userId]) {
             userPointsMap[pred.userId] = 0;
           }
-          userPointsMap[pred.userId] += pts;
+          
+          const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
+          if (isFinal) {
+            userPointsMap[pred.userId] += pts;
+          }
         });
 
         // Actualizar tabla de usuarios
