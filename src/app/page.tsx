@@ -1741,7 +1741,9 @@ export default function Home() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-950/60 pb-4">
                     <div>
                       <h2 className="text-xl font-extrabold text-slate-200">Tabla de Clasificación</h2>
-                      <p className="text-slate-400 text-xs mt-1">Conoce a los mejores pronosticadores de la copa</p>
+                      <p className="text-slate-400 text-xs mt-1">
+                        Conoce a los mejores pronosticadores de la copa • <span className="text-emerald-400 font-semibold">Toca sobre cualquier jugador para auditar sus pronósticos 👁️</span>
+                      </p>
                     </div>
 
                     {/* Group Selector Dropdown */}
@@ -1816,7 +1818,7 @@ export default function Home() {
                               </td>
                               <td className="py-3 sm:py-4 px-3 sm:px-6 truncate max-w-[150px] sm:max-w-[200px]">
                                 <span className="align-middle hover:text-emerald-400 transition-colors">{userProf.displayName}</span>
-                                <span className="inline-block ml-1.5 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 text-[10px] align-middle">👁️</span>
+                                <span className="inline-block ml-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-slate-500 text-[10px] align-middle">👁️</span>
                                 {isMe && (
                                   <span className="inline-flex items-center ml-2 space-x-1.5 align-middle" onClick={(e) => e.stopPropagation()}>
                                     <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">Tú</span>
