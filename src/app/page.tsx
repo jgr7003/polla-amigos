@@ -2815,12 +2815,23 @@ export default function Home() {
             {/* Match List */}
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
               {(() => {
-                const filteredList = sortedMatches.filter(match => {
+                let filteredList = sortedMatches.filter(match => {
                   if (viewingUserFilter === "started") {
                     return hasMatchStarted(match);
                   }
                   return true;
                 });
+
+                if (viewingUserFilter === "started") {
+                  filteredList = [...filteredList].sort((a, b) => {
+                    const dateA = getMatchStartDate(a).getTime();
+                    const dateB = getMatchStartDate(b).getTime();
+                    if (dateA !== dateB) {
+                      return dateB - dateA;
+                    }
+                    return b.num - a.num;
+                  });
+                }
 
                 if (filteredList.length === 0) {
                   return (
@@ -2846,8 +2857,21 @@ export default function Home() {
                   return (
                     <div key={match.id} className="bg-slate-955/45 border border-slate-850 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-955/80 transition-colors">
                       <div className="flex-1 min-w-0">
-                        <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
-                        <div className="font-extrabold text-sm text-slate-200 mt-1 flex items-center space-x-2 truncate">
+                        <div className="flex justify-between items-center sm:justify-start sm:gap-2">
+                          <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">
+                            {formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}
+                          </span>
+                          {(() => {
+                            const isLive = hasStarted && (match.result === null || match.result.isFinal === false);
+                            return isLive ? (
+                              <span className="text-[9px] bg-amber-500/15 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
+                                <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping"></span>
+                                ⚡ En Juego
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
+                        <div className="font-extrabold text-sm text-slate-200 mt-1.5 flex items-center space-x-2 truncate">
                           {getFlagUrl(match.team1) && (
                             <img src={getFlagUrl(match.team1)!} alt={match.team1} className="w-5 h-3.5 object-cover rounded-sm border border-slate-900 shrink-0" />
                           )}
@@ -2878,15 +2902,9 @@ export default function Home() {
                             const liveGoals1 = match.result ? match.result.goals1 : 0;
                             const liveGoals2 = match.result ? match.result.goals2 : 0;
                             return (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] bg-amber-500/15 border border-amber-500/30 text-amber-500 px-2.5 py-0.5 rounded-lg font-extrabold flex items-center gap-1 animate-pulse">
-                                  <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping"></span>
-                                  ⚡ En Juego
-                                </span>
-                                <span className="text-[11px] bg-slate-900/60 border border-slate-800 text-slate-300 px-2 py-0.5 rounded-lg font-bold">
-                                  En Vivo: {liveGoals1} - {liveGoals2}
-                                </span>
-                              </div>
+                              <span className="text-[11px] bg-slate-900/60 border border-slate-800 text-slate-300 px-2 py-1 rounded-lg font-bold">
+                                En Vivo: {liveGoals1} - {liveGoals2}
+                              </span>
                             );
                           }
 
