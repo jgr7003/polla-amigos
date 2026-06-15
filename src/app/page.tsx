@@ -1063,7 +1063,7 @@ export default function Home() {
     let rollover = 0;
 
     sortedMatches.forEach(match => {
-      if (!match.result) return;
+      if (!match.result || match.result.isFinal === false) return;
 
       const matchPreds = allPredictions.filter(p => p.matchId === match.id);
       if (matchPreds.length === 0) return;
@@ -1590,6 +1590,8 @@ export default function Home() {
                             const draft = predictionDrafts[match.id] || { goals1: "", goals2: "" };
                             const isSaving = savingMatches[match.id];
                             const hasResult = match.result !== null;
+                            const isFinal = match.result !== null && match.result.isFinal !== false;
+                            const isLive = hasMatchStarted(match) && (match.result === null || match.result.isFinal === false);
 
                             const matchDate = getMatchStartDate(match);
                             const localTimeStr = matchDate.toLocaleTimeString(undefined, {
@@ -1605,8 +1607,16 @@ export default function Home() {
                                 className="bg-slate-900/40 hover:bg-slate-900/60 transition-all border border-slate-900/80 hover:border-slate-800 rounded-2xl p-5 flex flex-col justify-between"
                               >
                                 {/* Match Header */}
-                                <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4">
+                                <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4 relative">
                                   <span className="font-bold text-emerald-500">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
+                                  {isLive && (
+                                    <div className="absolute left-1/2 -translate-x-1/2">
+                                      <span className="text-[10px] sm:text-xs bg-amber-500/15 border border-amber-500/30 text-amber-500 px-2.5 py-1 rounded-lg font-extrabold flex items-center gap-1.5 animate-pulse">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                                        ⚡ En Juego
+                                      </span>
+                                    </div>
+                                  )}
                                   <span className="font-semibold text-slate-300">{localTimeStr} {tzAbbr}</span>
                                 </div>
 
@@ -1683,48 +1693,77 @@ export default function Home() {
                                   <span className="text-[10px] text-slate-500 truncate max-w-[150px]">
                                     {match.ground}
                                   </span>
-                                  {hasResult ? (
-                                    <div className="flex items-center space-x-2">
-                                      <span className="text-xs bg-slate-950 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-lg">
-                                        {match.result?.isFinal === false ? "En Vivo: " : "Final: "}{match.result?.goals1} - {match.result?.goals2}
-                                      </span>
-                                      <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 5
-                                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                        : (pred?.points ?? 0) === 3
-                                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                                          : (pred?.points ?? 0) === 2
-                                            ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                                            : (pred?.points ?? 0) === 1
-                                              ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                                              : "bg-slate-800 text-slate-500 border border-transparent"
-                                        }`}>
-                                        +{pred?.points ?? 0} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
-                                      </span>
-                                    </div>
-                                  ) : hasMatchStarted(match) ? (
-                                    <div className="flex items-center space-x-2">
-                                      <span className="text-xs bg-slate-950 border border-slate-800 text-amber-500 px-2.5 py-1 rounded-lg font-bold">
-                                        ⚡ En Juego
-                                      </span>
-                                      {pred ? (
-                                        <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-400">
-                                          Pronóstico: {pred.goals1} - {pred.goals2}
-                                        </span>
-                                      ) : (
-                                        <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
-                                          Sin pronóstico
-                                        </span>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <button
-                                      onClick={() => savePrediction(match.id)}
-                                      disabled={isSaving || draft.goals1 === "" || draft.goals2 === ""}
-                                      className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-850 disabled:text-slate-600 disabled:border-slate-800/80 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md active:scale-[0.95]"
-                                    >
-                                      {isSaving ? "Guardando..." : pred ? "Actualizar" : "Guardar"}
-                                    </button>
-                                  )}
+                                  {(() => {
+                                    const isFinal = match.result !== null && match.result.isFinal !== false;
+                                    const isLive = hasMatchStarted(match) && (match.result === null || match.result.isFinal === false);
+
+                                    if (isFinal) {
+                                      return (
+                                        <div className="flex items-center space-x-2">
+                                          <span className="text-xs bg-slate-950 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-lg">
+                                            Final: {match.result?.goals1} - {match.result?.goals2}
+                                          </span>
+                                          {pred ? (
+                                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 5
+                                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                              : (pred?.points ?? 0) === 3
+                                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                                : (pred?.points ?? 0) === 2
+                                                  ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                                  : (pred?.points ?? 0) === 1
+                                                    ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                                                    : "bg-slate-800 text-slate-500 border-transparent"
+                                              }`}>
+                                              +{pred?.points ?? 0} Pts
+                                            </span>
+                                          ) : (
+                                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
+                                              Sin pronóstico
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+
+                                    if (isLive) {
+                                      const liveGoals1 = match.result ? match.result.goals1 : 0;
+                                      const liveGoals2 = match.result ? match.result.goals2 : 0;
+                                      const currentPoints = pred ? calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2) : 0;
+
+                                      return (
+                                        <div className="flex items-center space-x-2">
+                                          <span className="text-xs bg-slate-950 border border-slate-800 text-slate-350 px-2.5 py-1 rounded-lg font-bold">
+                                            En Vivo: <span className="text-amber-400">{liveGoals1} - {liveGoals2}</span>
+                                          </span>
+                                          {pred ? (
+                                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
+                                              currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                              currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                              currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                                              currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                              "bg-slate-800 text-slate-505 border border-transparent"
+                                            }`}>
+                                              +{currentPoints} Pts (Prov.)
+                                            </span>
+                                          ) : (
+                                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
+                                              Sin pronóstico
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+
+                                    return (
+                                      <button
+                                        onClick={() => savePrediction(match.id)}
+                                        disabled={isSaving || draft.goals1 === "" || draft.goals2 === ""}
+                                        className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-850 disabled:text-slate-600 disabled:border-slate-800/80 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md active:scale-[0.95]"
+                                      >
+                                        {isSaving ? "Guardando..." : pred ? "Actualizar" : "Guardar"}
+                                      </button>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             );
@@ -2823,36 +2862,64 @@ export default function Home() {
 
                       <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
                         {/* Real result indicator */}
-                        {hasResult ? (
-                          <span className="text-[11px] bg-slate-900/60 border border-slate-800 text-slate-300 px-2 py-1 rounded-lg font-bold">
-                            {match.result?.isFinal === false ? "En Vivo: " : "Final: "}{match.result?.goals1} - {match.result?.goals2}
-                          </span>
-                        ) : hasStarted ? (
-                          <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2.5 py-1 rounded-lg font-extrabold">
-                            ⚡ En Juego
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-slate-500 font-semibold">{localTimeStr} {tzAbbr}</span>
-                        )}
+                        {(() => {
+                          const isFinal = match.result !== null && match.result.isFinal !== false;
+                          const isLive = hasStarted && (match.result === null || match.result.isFinal === false);
+
+                          if (isFinal) {
+                            return (
+                              <span className="text-[11px] bg-slate-900/60 border border-slate-800 text-slate-300 px-2 py-1 rounded-lg font-bold">
+                                Final: {match.result?.goals1} - {match.result?.goals2}
+                              </span>
+                            );
+                          }
+
+                          if (isLive) {
+                            const liveGoals1 = match.result ? match.result.goals1 : 0;
+                            const liveGoals2 = match.result ? match.result.goals2 : 0;
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] bg-amber-500/15 border border-amber-500/30 text-amber-500 px-2.5 py-0.5 rounded-lg font-extrabold flex items-center gap-1 animate-pulse">
+                                  <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping"></span>
+                                  ⚡ En Juego
+                                </span>
+                                <span className="text-[11px] bg-slate-900/60 border border-slate-800 text-slate-300 px-2 py-0.5 rounded-lg font-bold">
+                                  En Vivo: {liveGoals1} - {liveGoals2}
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <span className="text-[10px] text-slate-500 font-semibold">{localTimeStr} {tzAbbr}</span>
+                          );
+                        })()}
 
                         {/* Prediction view */}
                         <div className="flex items-center gap-2 min-w-[90px] justify-end">
                           {hasStarted ? (
                             pred ? (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs bg-slate-900 border border-slate-800 text-emerald-450 px-2 py-1 rounded-lg font-bold font-mono">
-                                  {pred.goals1} - {pred.goals2}
-                                </span>
-                                <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                                  pred.points === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                  pred.points === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                  pred.points === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                  pred.points === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                  "bg-slate-900 text-slate-500 border-transparent"
-                                }`}>
-                                  +{pred.points} Pts
-                                </span>
-                              </div>
+                              (() => {
+                                const liveGoals1 = match.result ? match.result.goals1 : 0;
+                                const liveGoals2 = match.result ? match.result.goals2 : 0;
+                                const currentPoints = calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2);
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs bg-slate-900 border border-slate-800 text-emerald-450 px-2 py-1 rounded-lg font-bold font-mono">
+                                      {pred.goals1} - {pred.goals2}
+                                    </span>
+                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                                      currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                      currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                      currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                                      currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                      "bg-slate-900 text-slate-500 border-transparent"
+                                    }`}>
+                                      +{currentPoints} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
+                                    </span>
+                                  </div>
+                                );
+                              })()
                             ) : (
                               <span className="text-[10px] text-rose-500 font-bold bg-rose-500/5 px-2.5 py-1 rounded-lg border border-rose-500/10">Sin pronóstico</span>
                             )
