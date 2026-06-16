@@ -10,6 +10,7 @@ import {
   doc,
   setDoc,
   getDocs,
+  getDoc,
   writeBatch,
   deleteDoc,
   where
@@ -96,7 +97,7 @@ function getMatchStartDate(match: Match): Date {
 }
 
 function hasMatchStarted(match: Match): boolean {
-  if (match.result !== null) {
+  if (match.result != null) {
     return true;
   }
   const startDate = getMatchStartDate(match);
@@ -105,10 +106,22 @@ function hasMatchStarted(match: Match): boolean {
 
 // Only hides matches from PREVIOUS days, not today's matches (even if they already started/finished)
 function isFromPreviousDay(match: Match): boolean {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const matchDate = getMatchStartDate(match);
-  return matchDate.getTime() < todayStart.getTime();
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const dd = String(today.getDate()).padStart(2, "0");
+  const todayStr = `${yyyy}-${mm}-${dd}`;
+  return match.date < todayStr;
+}
+
+function isArchivedMatch(match: Match): boolean {
+  if (isFromPreviousDay(match)) {
+    return true;
+  }
+  if (match.result != null && match.result.isFinal !== false) {
+    return true;
+  }
+  return false;
 }
 
 function formatMatchDateTimeLocal(match: Match): string {
@@ -270,43 +283,104 @@ export default function Home() {
     const cacheTTL = 12 * 60 * 60 * 1000; // 12 hours
 
     const loadMatches = async () => {
-      // Try local cache first
-      let cachedData: Match[] | null = null;
-      let cachedTime: string | null = null;
+      const todayStr = (() => {
+        const t = new Date();
+        return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+      })();
+
+      const ARCHIVED_TTL = 24 * 60 * 60 * 1000; // 24h — past days never change
+      const ACTIVE_TTL   =  5 * 60 * 1000;       // 5 min — today's live scores refresh quickly
+
+      // --- Read both caches ---
+      let archivedMatches: Match[] | null = null;
+      let activeMatches: Match[]   | null = null;
+      let activeCacheTime: number  | null = null;
+
       try {
-        const cachedStr = localStorage.getItem("polla_matches_cache");
-        cachedTime = localStorage.getItem("polla_matches_cache_time");
-        if (cachedStr && cachedTime) {
-          const parsed = JSON.parse(cachedStr) as Match[];
-          cachedData = parsed;
-          setMatches(parsed);
-          setLastMatchesUpdate(parseInt(cachedTime, 10));
+        const str  = localStorage.getItem("polla_archived_cache");
+        const time = localStorage.getItem("polla_archived_cache_time");
+        if (str && time && (Date.now() - parseInt(time, 10)) <= ARCHIVED_TTL) {
+          archivedMatches = JSON.parse(str) as Match[];
         }
-      } catch (e) {
-        console.error("Error reading matches cache:", e);
+      } catch (e) { console.error("Error reading archived cache:", e); }
+
+      try {
+        const str  = localStorage.getItem("polla_active_cache");
+        const time = localStorage.getItem("polla_active_cache_time");
+        if (str && time) {
+          activeCacheTime = parseInt(time, 10);
+          if ((Date.now() - activeCacheTime) <= ACTIVE_TTL) {
+            activeMatches = JSON.parse(str) as Match[];
+          }
+        }
+      } catch (e) { console.error("Error reading active cache:", e); }
+
+      // Both caches valid → check if admin updated scores since last fetch
+      if (archivedMatches && activeMatches) {
+        try {
+          const versionSnap = await getDoc(doc(db, "meta", "matches_version"));
+          const serverUpdatedAt: number = versionSnap.exists() ? (versionSnap.data().updatedAt ?? 0) : 0;
+          if (serverUpdatedAt > activeCacheTime!) {
+            // Admin updated scores — invalidate active cache and re-fetch
+            activeMatches = null;
+          }
+        } catch (e) {
+          // Non-critical: ignore version check errors, serve from cache
+          console.warn("Could not check matches_version:", e);
+        }
       }
 
-      // Fetch from Firestore if expired or missing
-      const isExpired = !cachedTime || (Date.now() - parseInt(cachedTime, 10)) > cacheTTL;
-      if (!cachedData || isExpired) {
-        setMatchesSyncing(true);
-        try {
-          const qMatches = query(collection(db, "matches"), orderBy("num", "asc"));
-          const snapshot = await getDocs(qMatches);
-          const list: Match[] = [];
-          snapshot.forEach((doc) => {
-            list.push({ ...doc.data() as Match, id: doc.id });
-          });
-          setMatches(list);
-          localStorage.setItem("polla_matches_cache", JSON.stringify(list));
+      // Both caches valid and not stale → 0 Firestore reads
+      if (archivedMatches && activeMatches) {
+        const merged = [...archivedMatches, ...activeMatches].sort((a, b) => a.num - b.num);
+        setMatches(merged);
+        setLastMatchesUpdate(activeCacheTime!);
+        return;
+      }
+
+      // --- Need to fetch from Firestore ---
+      setMatchesSyncing(true);
+      try {
+        if (archivedMatches) {
+          // Archived cache still valid — only fetch today + future (~4–8 docs)
+          const qActive = query(
+            collection(db, "matches"),
+            where("date", ">=", todayStr)
+          );
+          const snap = await getDocs(qActive);
+          const freshActive: Match[] = [];
+          snap.forEach((d) => freshActive.push({ ...d.data() as Match, id: d.id }));
+          freshActive.sort((a, b) => a.num - b.num);
+
           const now = Date.now();
-          localStorage.setItem("polla_matches_cache_time", String(now));
+          localStorage.setItem("polla_active_cache", JSON.stringify(freshActive));
+          localStorage.setItem("polla_active_cache_time", String(now));
           setLastMatchesUpdate(now);
-        } catch (err) {
-          console.error("Error fetching matches from Firestore:", err);
-        } finally {
-          setMatchesSyncing(false);
+
+          const merged = [...archivedMatches, ...freshActive].sort((a, b) => a.num - b.num);
+          setMatches(merged);
+        } else {
+          // Full fetch (first load or archived cache expired)
+          const qAll = query(collection(db, "matches"), orderBy("num", "asc"));
+          const snap = await getDocs(qAll);
+          const all: Match[] = [];
+          snap.forEach((d) => all.push({ ...d.data() as Match, id: d.id }));
+
+          const archived = all.filter(m => m.date < todayStr);
+          const active   = all.filter(m => m.date >= todayStr);
+          const now = Date.now();
+
+          localStorage.setItem("polla_archived_cache",      JSON.stringify(archived));
+          localStorage.setItem("polla_archived_cache_time", String(now));
+          localStorage.setItem("polla_active_cache",        JSON.stringify(active));
+          localStorage.setItem("polla_active_cache_time",   String(now));
+          setLastMatchesUpdate(now);
+          setMatches(all);
         }
+      } catch (err) {
+        console.error("Error fetching matches from Firestore:", err);
+      } finally {
+        setMatchesSyncing(false);
       }
     };
 
@@ -631,7 +705,7 @@ export default function Home() {
     }
   };
 
-  // Helper for manual matching synchronization
+  // Helper for manual matching synchronization (updates both cache segments)
   const forceSyncMatches = async () => {
     if (matchesSyncing) return;
 
@@ -650,19 +724,28 @@ export default function Home() {
       console.error("Error reading last manual sync time:", e);
     }
 
+    const todayStr = (() => {
+      const t = new Date();
+      return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+    })();
+
     setMatchesSyncing(true);
     try {
       const qMatches = query(collection(db, "matches"), orderBy("num", "asc"));
       const snapshot = await getDocs(qMatches);
       const list: Match[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ ...doc.data() as Match, id: doc.id });
-      });
-      setMatches(list);
-      localStorage.setItem("polla_matches_cache", JSON.stringify(list));
+      snapshot.forEach((d) => list.push({ ...d.data() as Match, id: d.id }));
+
+      // Re-split and persist both cache segments
+      const archived = list.filter(m => m.date < todayStr);
+      const active   = list.filter(m => m.date >= todayStr);
       const now = Date.now();
-      localStorage.setItem("polla_matches_cache_time", String(now));
-      localStorage.setItem("polla_last_manual_sync", String(now));
+      localStorage.setItem("polla_archived_cache",      JSON.stringify(archived));
+      localStorage.setItem("polla_archived_cache_time", String(now));
+      localStorage.setItem("polla_active_cache",        JSON.stringify(active));
+      localStorage.setItem("polla_active_cache_time",   String(now));
+      localStorage.setItem("polla_last_manual_sync",    String(now));
+      setMatches(list);
       setLastMatchesUpdate(now);
       showToast("¡Partidos sincronizados desde la base de datos correctamente!", "success");
     } catch (err) {
@@ -779,6 +862,9 @@ export default function Home() {
         }
       });
       await userBatch.commit();
+
+      // Bump matches_version so clients invalidate their active cache on next load
+      await setDoc(doc(db, "meta", "matches_version"), { updatedAt: Date.now() }, { merge: true });
 
       alert("Resultado guardado y puntajes recalculados exitosamente.");
     } catch (err) {
@@ -1021,6 +1107,8 @@ export default function Home() {
         });
 
         await batch.commit();
+        // Bump matches_version so clients invalidate their active cache on next load
+        await setDoc(doc(db, "meta", "matches_version"), { updatedAt: Date.now() }, { merge: true });
         alert(`Sincronización exitosa. Se actualizaron ${updatedMatchesCount} partidos y se recalcularon todos los puntajes.`);
       } else {
         await batch.commit();
@@ -1238,25 +1326,24 @@ export default function Home() {
     : sortedMatches.filter(m => m.round === selectedRound);
 
   const pastMatchesCount = React.useMemo(() => {
-    return filteredMatches.filter(isFromPreviousDay).length;
+    return filteredMatches.filter(isArchivedMatch).length;
   }, [filteredMatches]);
 
-  const userFilteredMatches = React.useMemo(() => {
-    if (hidePastMatches) {
-      return filteredMatches.filter(m => !isFromPreviousDay(m));
-    }
-    return filteredMatches;
-  }, [filteredMatches, hidePastMatches]);
-
-  const adminFilteredMatches = React.useMemo(() => {
-    if (hidePastMatchesAdmin) {
-      return filteredMatches.filter(m => !isFromPreviousDay(m));
-    }
-    return filteredMatches;
-  }, [filteredMatches, hidePastMatchesAdmin]);
-
-  const userGroupedMatches = React.useMemo(() => {
-    const sorted = [...userFilteredMatches].sort((a, b) => {
+  const combinedUserGroupedMatches = React.useMemo(() => {
+    console.log("DEBUG matches:", {
+      hidePastMatches,
+      filteredMatches: filteredMatches.map(m => ({
+        id: m.id,
+        num: m.num,
+        team1: m.team1,
+        team2: m.team2,
+        result: m.result,
+        isArchived: isArchivedMatch(m),
+        isFromPreviousDay: isFromPreviousDay(m)
+      }))
+    });
+    // 1. Group active matches (oldest to newest)
+    const activeSorted = [...filteredMatches.filter(m => !isArchivedMatch(m))].sort((a, b) => {
       const dateA = getMatchStartDate(a).getTime();
       const dateB = getMatchStartDate(b).getTime();
       if (dateA !== dateB) {
@@ -1265,10 +1352,10 @@ export default function Home() {
       return a.num - b.num;
     });
 
-    const groups: { [key: string]: Match[] } = {};
-    const groupOrder: string[] = [];
+    const activeGroups: { [key: string]: Match[] } = {};
+    const activeOrder: string[] = [];
 
-    sorted.forEach((match) => {
+    activeSorted.forEach((match) => {
       const matchDate = getMatchStartDate(match);
       const label = capitalizeFirstLetter(
         matchDate.toLocaleDateString(undefined, {
@@ -1278,18 +1365,69 @@ export default function Home() {
           year: "numeric"
         })
       );
-      if (!groups[label]) {
-        groups[label] = [];
-        groupOrder.push(label);
+      if (!activeGroups[label]) {
+        activeGroups[label] = [];
+        activeOrder.push(label);
       }
-      groups[label].push(match);
+      activeGroups[label].push(match);
     });
 
-    return groupOrder.map(label => ({
+    const activeGroups_result = activeOrder.map(label => ({
       dateLabel: label,
-      matches: groups[label]
+      isArchived: false,
+      matches: activeGroups[label]
     }));
-  }, [userFilteredMatches]);
+
+    // 2. Group archived matches (newest to oldest, matches inside also newest first)
+    if (!hidePastMatches) {
+      const archivedSorted = [...filteredMatches.filter(m => isArchivedMatch(m))].sort((a, b) => {
+        const dateA = getMatchStartDate(a).getTime();
+        const dateB = getMatchStartDate(b).getTime();
+        if (dateA !== dateB) {
+          return dateB - dateA; // Newest date first
+        }
+        return b.num - a.num; // Newest match first
+      });
+
+      const archivedGroups: { [key: string]: Match[] } = {};
+      const archivedOrder: string[] = [];
+
+      archivedSorted.forEach((match) => {
+        const matchDate = getMatchStartDate(match);
+        const label = capitalizeFirstLetter(
+          matchDate.toLocaleDateString(undefined, {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric"
+          })
+        );
+        if (!archivedGroups[label]) {
+          archivedGroups[label] = [];
+          archivedOrder.push(label);
+        }
+        archivedGroups[label].push(match);
+      });
+
+      // Archived groups go FIRST so they appear at the top without scrolling
+      const archivedResult = archivedOrder.map(label => ({
+        dateLabel: label,
+        isArchived: true,
+        matches: archivedGroups[label]
+      }));
+
+      return [...archivedResult, ...activeGroups_result];
+    }
+
+    return activeGroups_result;
+  }, [filteredMatches, hidePastMatches]);
+
+  const adminFilteredMatches = React.useMemo(() => {
+    if (hidePastMatchesAdmin) {
+      return filteredMatches.filter(m => !isArchivedMatch(m));
+    }
+    return filteredMatches;
+  }, [filteredMatches, hidePastMatchesAdmin]);
 
   const groupedMatches = React.useMemo(() => {
     const sorted = [...adminFilteredMatches].sort((a, b) => {
@@ -1689,7 +1827,7 @@ export default function Home() {
 
                   {/* Matches Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {userGroupedMatches.length === 0 ? (
+                    {combinedUserGroupedMatches.length === 0 ? (
                       <div className="col-span-full py-12 text-center text-slate-500 bg-slate-900/10 border border-slate-900/40 rounded-2xl p-6">
                         {pastMatchesCount > 0 && hidePastMatches ? (
                           <>
@@ -1698,7 +1836,7 @@ export default function Home() {
                               onClick={() => setHidePastMatches(false)}
                               className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-extrabold rounded-xl transition-colors shadow-lg shadow-emerald-500/20"
                             >
-                              Ver partidos pasados
+                              Ver partidos finalizados
                             </button>
                           </>
                         ) : (
@@ -1706,40 +1844,61 @@ export default function Home() {
                         )}
                       </div>
                     ) : (
-                      userGroupedMatches.map((group) => (
-                        <React.Fragment key={group.dateLabel}>
-                          {/* Day Header */}
-                          <div className="col-span-full mt-6 first:mt-0 mb-2">
-                            <div className="flex items-center space-x-3">
-                              <span className="text-[11px] font-extrabold text-emerald-400 uppercase tracking-wider bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800/80 shadow-sm">
-                                {group.dateLabel}
-                              </span>
-                              <div className="h-px bg-slate-900 flex-1"></div>
+                      combinedUserGroupedMatches.map((group, index) => {
+                        // Show archived section header at the very first archived group
+                        const showArchivedHeader = group.isArchived && (index === 0 || !combinedUserGroupedMatches[index - 1].isArchived);
+                        // Show upcoming section header at the first active group after archived groups
+                        const showUpcomingHeader = !group.isArchived && index > 0 && combinedUserGroupedMatches[index - 1].isArchived;
+                        return (
+                          <React.Fragment key={`${group.dateLabel}-${group.isArchived ? "archived" : "active"}`}>
+                            {showArchivedHeader && (
+                              <div className="col-span-full mb-4 flex items-center space-x-3">
+                                <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                                  <span>📚</span> Historial de Partidos Finalizados
+                                </h3>
+                                <div className="h-px bg-slate-800/60 flex-1"></div>
+                              </div>
+                            )}
+                            {showUpcomingHeader && (
+                              <div className="col-span-full mt-10 mb-4 flex items-center space-x-3">
+                                <h3 className="text-xs font-extrabold text-emerald-500/70 uppercase tracking-wider flex items-center gap-1.5">
+                                  <span>📅</span> Próximos Partidos
+                                </h3>
+                                <div className="h-px bg-slate-800/60 flex-1"></div>
+                              </div>
+                            )}
+                            {/* Day Header */}
+                            <div className="col-span-full mt-6 first:mt-0 mb-2">
+                              <div className="flex items-center space-x-3">
+                                <span className={`text-[11px] font-extrabold uppercase tracking-wider bg-slate-900/80 px-3 py-1.5 rounded-xl border shadow-sm ${group.isArchived ? "text-slate-400 border-slate-900" : "text-emerald-400 border-slate-800/80"}`}>
+                                  {group.dateLabel}
+                                </span>
+                                <div className="h-px bg-slate-900 flex-1"></div>
+                              </div>
                             </div>
-                          </div>
 
-                          {/* Group Matches */}
-                          {group.matches.map((match) => {
-                            const pred = predictions[match.id];
-                            const draft = predictionDrafts[match.id] || { goals1: "", goals2: "" };
-                            const isSaving = savingMatches[match.id];
-                            const hasResult = match.result !== null;
-                            const isFinal = match.result !== null && match.result.isFinal !== false;
-                            const isLive = hasMatchStarted(match) && (match.result === null || match.result.isFinal === false);
+                            {/* Group Matches */}
+                            {group.matches.map((match) => {
+                              const pred = predictions[match.id];
+                              const draft = predictionDrafts[match.id] || { goals1: "", goals2: "" };
+                              const isSaving = savingMatches[match.id];
+                              const hasResult = match.result != null;
+                              const isFinal = match.result != null && match.result.isFinal !== false;
+                              const isLive = hasMatchStarted(match) && (match.result == null || match.result.isFinal === false);
 
-                            const matchDate = getMatchStartDate(match);
-                            const localTimeStr = matchDate.toLocaleTimeString(undefined, {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              hour12: false
-                            });
-                            const tzAbbr = getTzAbbreviation();
+                              const matchDate = getMatchStartDate(match);
+                              const localTimeStr = matchDate.toLocaleTimeString(undefined, {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false
+                              });
+                              const tzAbbr = getTzAbbreviation();
 
-                            return (
-                              <div
-                                key={match.id}
-                                className="bg-slate-900/40 hover:bg-slate-900/60 transition-all border border-slate-900/80 hover:border-slate-800 rounded-2xl p-5 flex flex-col justify-between"
-                              >
+                              return (
+                                <div
+                                  key={match.id}
+                                  className={`bg-slate-900/40 hover:bg-slate-900/60 transition-all border border-slate-900/80 hover:border-slate-800 rounded-2xl p-5 flex flex-col justify-between ${group.isArchived ? "opacity-80 border-slate-950/60" : ""}`}
+                                >
                                 {/* Match Header */}
                                 <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4 relative">
                                   <span className="font-bold text-emerald-500">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
@@ -1843,8 +2002,8 @@ export default function Home() {
                                     {match.ground}
                                   </span>
                                   {(() => {
-                                    const isFinal = match.result !== null && match.result.isFinal !== false;
-                                    const isLive = hasMatchStarted(match) && (match.result === null || match.result.isFinal === false);
+                                    const isFinal = match.result != null && match.result.isFinal !== false;
+                                    const isLive = hasMatchStarted(match) && (match.result == null || match.result.isFinal === false);
 
                                     if (isFinal) {
                                       return (
@@ -1918,7 +2077,7 @@ export default function Home() {
                             );
                           })}
                         </React.Fragment>
-                      ))
+                      ); })
                     )}
                   </div>
                 </div>
@@ -2439,7 +2598,7 @@ export default function Home() {
                                     const pred = adminUserPredictions[match.id];
                                     const draft = adminUserDrafts[match.id] || { goals1: "", goals2: "" };
                                     const isSaving = adminSavingUserPreds[match.id];
-                                    const hasResult = match.result !== null;
+                                    const hasResult = match.result != null;
 
                                     const matchDate = getMatchStartDate(match);
                                     const localTimeStr = matchDate.toLocaleTimeString(undefined, {
@@ -2998,7 +3157,7 @@ export default function Home() {
                 return filteredList.map(match => {
                   const pred = viewingUserPredictions.find(p => p.matchId === match.id);
                   const hasStarted = hasMatchStarted(match);
-                  const hasResult = match.result !== null;
+                  const hasResult = match.result != null;
 
                   const matchDate = getMatchStartDate(match);
                   const localTimeStr = matchDate.toLocaleTimeString(undefined, {
@@ -3016,7 +3175,7 @@ export default function Home() {
                             {formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}
                           </span>
                           {(() => {
-                            const isLive = hasStarted && (match.result === null || match.result.isFinal === false);
+                            const isLive = hasStarted && (match.result == null || match.result.isFinal === false);
                             return isLive ? (
                               <span className="text-[9px] bg-amber-500/15 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
                                 <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping"></span>
@@ -3041,8 +3200,8 @@ export default function Home() {
                       <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
                         {/* Real result indicator */}
                         {(() => {
-                          const isFinal = match.result !== null && match.result.isFinal !== false;
-                          const isLive = hasStarted && (match.result === null || match.result.isFinal === false);
+                          const isFinal = match.result != null && match.result.isFinal !== false;
+                          const isLive = hasStarted && (match.result == null || match.result.isFinal === false);
 
                           if (isFinal) {
                             return (
