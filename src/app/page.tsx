@@ -11,7 +11,8 @@ import {
   setDoc,
   getDocs,
   writeBatch,
-  deleteDoc
+  deleteDoc,
+  where
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { calculatePoints } from "@/lib/scoreCalculator";
@@ -177,9 +178,16 @@ export default function Home() {
   // Data lists
   const [matches, setMatches] = useState<Match[]>([]);
   const [predictions, setPredictions] = useState<{ [matchId: string]: Prediction }>({});
-  const [allPredictions, setAllPredictions] = useState<Prediction[]>([]);
   const [leaderboard, setLeaderboard] = useState<UserProfile[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+
+  // Caching & inspection states
+  const [viewingUserPredictions, setViewingUserPredictions] = useState<Prediction[]>([]);
+  const [viewingUserPredsLoading, setViewingUserPredsLoading] = useState(false);
+  const [matchesSyncing, setMatchesSyncing] = useState(false);
+  const [lastMatchesUpdate, setLastMatchesUpdate] = useState<number | null>(null);
+  const [syncCooldown, setSyncCooldown] = useState(0);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
   // Filter & prediction draft inputs
   const [selectedRound, setSelectedRound] = useState<string>("Todos");
@@ -256,56 +264,101 @@ export default function Home() {
     setPredictions({});
     setPredictionDrafts({});
 
-    // 1. Sync Matches
-    const qMatches = query(collection(db, "matches"), orderBy("num", "asc"));
-    const unsubMatches = onSnapshot(qMatches, (snapshot) => {
-      const list: Match[] = [];
-      const adminDrafts: { [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } } = {};
-      snapshot.forEach((doc) => {
-        const m = doc.data() as Match;
-        list.push({ ...m, id: doc.id });
-        if (m.result) {
-          adminDrafts[doc.id] = {
-            goals1: String(m.result.goals1),
-            goals2: String(m.result.goals2),
-            isFinal: m.result.isFinal ?? true
-          };
-        } else {
-          adminDrafts[doc.id] = {
-            goals1: "",
-            goals2: "",
-            isFinal: true
-          };
-        }
-      });
-      setMatches(list);
-      setAdminResults((prev) => ({ ...prev, ...adminDrafts }));
-    });
+    // 1. Sync Matches (with caching for regular users)
+    let unsubMatches = () => {};
+    const isAdmin = profile?.isAdmin === true;
+    const cacheTTL = 12 * 60 * 60 * 1000; // 12 hours
 
-    // 2. Sync Current User's Predictions
-    const qPreds = query(collection(db, "predictions"));
+    const loadMatches = async () => {
+      // Try local cache first
+      let cachedData: Match[] | null = null;
+      let cachedTime: string | null = null;
+      try {
+        const cachedStr = localStorage.getItem("polla_matches_cache");
+        cachedTime = localStorage.getItem("polla_matches_cache_time");
+        if (cachedStr && cachedTime) {
+          const parsed = JSON.parse(cachedStr) as Match[];
+          cachedData = parsed;
+          setMatches(parsed);
+          setLastMatchesUpdate(parseInt(cachedTime, 10));
+        }
+      } catch (e) {
+        console.error("Error reading matches cache:", e);
+      }
+
+      // Fetch from Firestore if expired or missing
+      const isExpired = !cachedTime || (Date.now() - parseInt(cachedTime, 10)) > cacheTTL;
+      if (!cachedData || isExpired) {
+        setMatchesSyncing(true);
+        try {
+          const qMatches = query(collection(db, "matches"), orderBy("num", "asc"));
+          const snapshot = await getDocs(qMatches);
+          const list: Match[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ ...doc.data() as Match, id: doc.id });
+          });
+          setMatches(list);
+          localStorage.setItem("polla_matches_cache", JSON.stringify(list));
+          const now = Date.now();
+          localStorage.setItem("polla_matches_cache_time", String(now));
+          setLastMatchesUpdate(now);
+        } catch (err) {
+          console.error("Error fetching matches from Firestore:", err);
+        } finally {
+          setMatchesSyncing(false);
+        }
+      }
+    };
+
+    if (isAdmin) {
+      const qMatches = query(collection(db, "matches"), orderBy("num", "asc"));
+      unsubMatches = onSnapshot(qMatches, (snapshot) => {
+        const list: Match[] = [];
+        const adminDrafts: { [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } } = {};
+        snapshot.forEach((doc) => {
+          const m = doc.data() as Match;
+          list.push({ ...m, id: doc.id });
+          if (m.result) {
+            adminDrafts[doc.id] = {
+              goals1: String(m.result.goals1),
+              goals2: String(m.result.goals2),
+              isFinal: m.result.isFinal ?? true
+            };
+          } else {
+            adminDrafts[doc.id] = {
+              goals1: "",
+              goals2: "",
+              isFinal: true
+            };
+          }
+        });
+        setMatches(list);
+        setAdminResults((prev) => ({ ...prev, ...adminDrafts }));
+      });
+    } else {
+      loadMatches();
+    }
+
+    // 2. Sync Current User's Predictions (Scoped to current user)
+    const qPreds = query(
+      collection(db, "predictions"),
+      where("userId", "==", user.uid)
+    );
     const unsubPreds = onSnapshot(qPreds, (snapshot) => {
       const userPreds: { [matchId: string]: Prediction } = {};
-      const allPredsList: Prediction[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data() as Prediction;
-        allPredsList.push(data);
-        if (data.userId === user.uid) {
-          userPreds[data.matchId] = data;
-        }
+        userPreds[data.matchId] = data;
       });
       setPredictions(userPreds);
-      setAllPredictions(allPredsList);
 
       // Initialize prediction drafts with existing values
       const drafts: { [matchId: string]: { goals1: string; goals2: string } } = {};
-      allPredsList.forEach((data) => {
-        if (data.userId === user.uid) {
-          drafts[data.matchId] = {
-            goals1: String(data.goals1),
-            goals2: String(data.goals2),
-          };
-        }
+      Object.keys(userPreds).forEach((matchId) => {
+        drafts[matchId] = {
+          goals1: String(userPreds[matchId].goals1),
+          goals2: String(userPreds[matchId].goals2),
+        };
       });
       setPredictionDrafts(drafts);
     });
@@ -337,9 +390,7 @@ export default function Home() {
       unsubUsers();
       unsubGroups();
     };
-  }, [user]);
-
-
+  }, [user, profile?.isAdmin]);
 
   // Sync selected user's predictions for admin edit
   useEffect(() => {
@@ -349,20 +400,21 @@ export default function Home() {
       return;
     }
 
-    const qPreds = query(collection(db, "predictions"));
+    const qPreds = query(
+      collection(db, "predictions"),
+      where("userId", "==", adminSelectedUserId)
+    );
     const unsubAdminUserPreds = onSnapshot(qPreds, (snapshot) => {
       const userPreds: { [matchId: string]: Prediction } = {};
       const drafts: { [matchId: string]: { goals1: string; goals2: string } } = {};
 
       snapshot.forEach((doc) => {
         const data = doc.data() as Prediction;
-        if (data.userId === adminSelectedUserId) {
-          userPreds[data.matchId] = data;
-          drafts[data.matchId] = {
-            goals1: String(data.goals1),
-            goals2: String(data.goals2),
-          };
-        }
+        userPreds[data.matchId] = data;
+        drafts[data.matchId] = {
+          goals1: String(data.goals1),
+          goals2: String(data.goals2),
+        };
       });
 
       setAdminUserPredictions(userPreds);
@@ -373,6 +425,80 @@ export default function Home() {
       unsubAdminUserPreds();
     };
   }, [user, profile?.isAdmin, adminSelectedUserId]);
+
+  // Load predictions for viewingUser when modal opens
+  useEffect(() => {
+    if (!viewingUser) {
+      setViewingUserPredictions([]);
+      return;
+    }
+
+    setViewingUserPredsLoading(true);
+    const q = query(
+      collection(db, "predictions"),
+      where("userId", "==", viewingUser.uid)
+    );
+
+    getDocs(q)
+      .then((snapshot) => {
+        const predsList: Prediction[] = [];
+        snapshot.forEach((doc) => {
+          predsList.push(doc.data() as Prediction);
+        });
+        setViewingUserPredictions(predsList);
+      })
+      .catch((err) => {
+        console.error("Error fetching viewing user predictions:", err);
+      })
+      .finally(() => {
+        setViewingUserPredsLoading(false);
+      });
+  }, [viewingUser]);
+
+  // Handle sync button cooldown countdown
+  useEffect(() => {
+    const checkCooldown = () => {
+      try {
+        const lastSync = localStorage.getItem("polla_last_manual_sync");
+        if (lastSync) {
+          const elapsed = Date.now() - parseInt(lastSync, 10);
+          const remaining = Math.max(0, Math.ceil((30000 - elapsed) / 1000));
+          setSyncCooldown(remaining);
+          return remaining;
+        }
+      } catch (e) {
+        console.error("Error reading sync cooldown:", e);
+      }
+      setSyncCooldown(0);
+      return 0;
+    };
+
+    const initialRemaining = checkCooldown();
+
+    if (initialRemaining > 0) {
+      const interval = setInterval(() => {
+        const remaining = checkCooldown();
+        if (remaining <= 0) {
+          clearInterval(interval);
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [matchesSyncing]);
+
+  // Handle Toast notifications auto-dismiss
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ message, type });
+  };
 
   // Force non-superadmins to the groups sub-tab when visiting the admin panel
   useEffect(() => {
@@ -480,16 +606,16 @@ export default function Home() {
         points: pts
       });
 
-      const allPredsSnap = await getDocs(collection(db, "predictions"));
+      const userPredsSnap = await getDocs(
+        query(collection(db, "predictions"), where("userId", "==", adminSelectedUserId))
+      );
       let totalPoints = 0;
-      allPredsSnap.forEach((pDoc) => {
+      userPredsSnap.forEach((pDoc) => {
         const pred = pDoc.data() as Prediction;
-        if (pred.userId === adminSelectedUserId) {
-          const match = matches.find(m => m.id === pred.matchId);
-          const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
-          if (isFinal) {
-            totalPoints += pred.points || 0;
-          }
+        const match = matches.find(m => m.id === pred.matchId);
+        const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
+        if (isFinal) {
+          totalPoints += pred.points || 0;
         }
       });
 
@@ -502,6 +628,48 @@ export default function Home() {
       alert("Error al guardar la predicción del usuario.");
     } finally {
       setAdminSavingUserPreds(prev => ({ ...prev, [matchId]: false }));
+    }
+  };
+
+  // Helper for manual matching synchronization
+  const forceSyncMatches = async () => {
+    if (matchesSyncing) return;
+
+    // Check if cooldown is active
+    try {
+      const lastSync = localStorage.getItem("polla_last_manual_sync");
+      if (lastSync) {
+        const elapsed = Date.now() - parseInt(lastSync, 10);
+        if (elapsed < 30000) {
+          const remaining = Math.ceil((30000 - elapsed) / 1000);
+          showToast(`Por favor espera ${remaining} segundos antes de sincronizar nuevamente.`, "info");
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Error reading last manual sync time:", e);
+    }
+
+    setMatchesSyncing(true);
+    try {
+      const qMatches = query(collection(db, "matches"), orderBy("num", "asc"));
+      const snapshot = await getDocs(qMatches);
+      const list: Match[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ ...doc.data() as Match, id: doc.id });
+      });
+      setMatches(list);
+      localStorage.setItem("polla_matches_cache", JSON.stringify(list));
+      const now = Date.now();
+      localStorage.setItem("polla_matches_cache_time", String(now));
+      localStorage.setItem("polla_last_manual_sync", String(now));
+      setLastMatchesUpdate(now);
+      showToast("¡Partidos sincronizados desde la base de datos correctamente!", "success");
+    } catch (err) {
+      console.error("Error manual syncing matches:", err);
+      showToast("Error al sincronizar partidos. Por favor intenta de nuevo.", "error");
+    } finally {
+      setMatchesSyncing(false);
     }
   };
 
@@ -562,19 +730,19 @@ export default function Home() {
         result: { goals1: rg1, goals2: rg2, isFinal: draft.isFinal ?? true }
       }, { merge: true });
 
-      // 2. Fetch all predictions for this match
-      const predSnap = await getDocs(collection(db, "predictions"));
+      // 2. Fetch all predictions for this match (Scoped by matchId)
+      const predSnap = await getDocs(
+        query(collection(db, "predictions"), where("matchId", "==", matchId))
+      );
       const batch = writeBatch(db);
 
       const updatedUserIds = new Set<string>();
 
       predSnap.forEach((pDoc) => {
         const pred = pDoc.data() as Prediction;
-        if (pred.matchId === matchId) {
-          const pts = calculatePoints(pred.goals1, pred.goals2, rg1, rg2);
-          batch.update(doc(db, "predictions", pred.id), { points: pts });
-          updatedUserIds.add(pred.userId);
-        }
+        const pts = calculatePoints(pred.goals1, pred.goals2, rg1, rg2);
+        batch.update(doc(db, "predictions", pred.id), { points: pts });
+        updatedUserIds.add(pred.userId);
       });
 
       // Commit predictions updates
@@ -1042,64 +1210,6 @@ export default function Home() {
     }
   };
 
-  // Compute financial metrics dynamically in real-time
-  const financialStats = React.useMemo(() => {
-    const sortedMatches = [...matches].sort((a, b) => a.num - b.num);
-
-    const stats: {
-      [userId: string]: {
-        invested: number;
-        winnings: number;
-        balance: number;
-        predictionsCount: number;
-      }
-    } = {};
-
-    // Ensure all users in leaderboard are initialized
-    leaderboard.forEach(u => {
-      stats[u.uid] = { invested: 0, winnings: 0, balance: 0, predictionsCount: 0 };
-    });
-
-    let rollover = 0;
-
-    sortedMatches.forEach(match => {
-      if (!match.result || match.result.isFinal === false) return;
-
-      const matchPreds = allPredictions.filter(p => p.matchId === match.id);
-      if (matchPreds.length === 0) return;
-
-      matchPreds.forEach(pred => {
-        if (!stats[pred.userId]) {
-          stats[pred.userId] = { invested: 0, winnings: 0, balance: 0, predictionsCount: 0 };
-        }
-        stats[pred.userId].predictionsCount += 1;
-        stats[pred.userId].invested += 500;
-      });
-
-      const totalPoolForMatch = (matchPreds.length * 500) + rollover;
-
-      const winners = matchPreds.filter(pred =>
-        pred.goals1 === match.result!.goals1 && pred.goals2 === match.result!.goals2
-      );
-
-      if (winners.length > 0) {
-        const winAmountPerUser = totalPoolForMatch / winners.length;
-        winners.forEach(winner => {
-          stats[winner.userId].winnings += winAmountPerUser;
-        });
-        rollover = 0;
-      } else {
-        rollover = totalPoolForMatch;
-      }
-    });
-
-    Object.keys(stats).forEach(uid => {
-      stats[uid].balance = stats[uid].winnings - stats[uid].invested;
-    });
-
-    return { stats, currentRollover: rollover };
-  }, [matches, allPredictions, leaderboard]);
-
   // Filtered leaderboard based on selected group
   const displayedLeaderboard = React.useMemo(() => {
     if (selectedGroupId === "global") {
@@ -1550,6 +1660,30 @@ export default function Home() {
                           <option key={round} value={round}>{formatRoundName(round)}</option>
                         ))}
                       </select>
+
+                      <button
+                        onClick={forceSyncMatches}
+                        disabled={matchesSyncing || syncCooldown > 0}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all border border-slate-800 bg-slate-900/60 hover:bg-slate-850 text-slate-350 disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                        title={syncCooldown > 0 ? `Por favor espera ${syncCooldown}s` : (lastMatchesUpdate ? `Última sincronización: ${new Date(lastMatchesUpdate).toLocaleTimeString()}` : "Forzar sincronización de partidos")}
+                      >
+                        {matchesSyncing ? (
+                          <>
+                            <span className="inline-block w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></span>
+                            Sincronizando...
+                          </>
+                        ) : syncCooldown > 0 ? (
+                          <>
+                            <span>⏳</span>
+                            Esperar {syncCooldown}s
+                          </>
+                        ) : (
+                          <>
+                            <span>🔄</span>
+                            Sincronizar
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
 
@@ -1610,11 +1744,26 @@ export default function Home() {
                                 <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4 relative">
                                   <span className="font-bold text-emerald-500">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
                                   {isLive && (
-                                    <div className="absolute left-1/2 -translate-x-1/2">
+                                    <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5">
                                       <span className="text-[10px] sm:text-xs bg-amber-500/15 border border-amber-500/30 text-amber-500 px-2.5 py-1 rounded-lg font-extrabold flex items-center gap-1.5 animate-pulse">
                                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
                                         ⚡ En Juego
                                       </span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          forceSyncMatches();
+                                        }}
+                                        disabled={matchesSyncing || syncCooldown > 0}
+                                        className="w-6 h-6 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850 flex items-center justify-center transition-all disabled:opacity-40 shrink-0 shadow-sm"
+                                        title={syncCooldown > 0 ? `Por favor espera ${syncCooldown}s` : "Actualizar marcador"}
+                                      >
+                                        {matchesSyncing ? (
+                                          <span className="w-2.5 h-2.5 border border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+                                        ) : (
+                                          <span className="text-[10px]">🔄</span>
+                                        )}
+                                      </button>
                                     </div>
                                   )}
                                   <span className="font-semibold text-slate-300">{localTimeStr} {tzAbbr}</span>
@@ -2814,7 +2963,12 @@ export default function Home() {
 
             {/* Match List */}
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-              {(() => {
+              {viewingUserPredsLoading ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
+                  <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-xs font-semibold animate-pulse">Cargando pronósticos...</p>
+                </div>
+              ) : (() => {
                 let filteredList = sortedMatches.filter(match => {
                   if (viewingUserFilter === "started") {
                     return hasMatchStarted(match);
@@ -2842,7 +2996,7 @@ export default function Home() {
                 }
 
                 return filteredList.map(match => {
-                  const pred = allPredictions.find(p => p.userId === viewingUser.uid && p.matchId === match.id);
+                  const pred = viewingUserPredictions.find(p => p.matchId === match.id);
                   const hasStarted = hasMatchStarted(match);
                   const hasResult = match.result !== null;
 
@@ -2967,6 +3121,26 @@ export default function Home() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom-5 duration-300">
+          <div className={`px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-2.5 text-xs font-bold ${
+            toast.type === "success" ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/20" :
+            toast.type === "error" ? "bg-rose-950/80 text-rose-400 border-rose-500/20" :
+            "bg-slate-900/80 text-slate-350 border-slate-800"
+          }`}>
+            <span className="text-sm">{toast.type === "success" ? "🏆" : toast.type === "error" ? "❌" : "ℹ️"}</span>
+            <span>{toast.message}</span>
+            <button
+              onClick={() => setToast(null)}
+              className="ml-2 text-slate-400 hover:text-white transition-colors font-extrabold"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}
