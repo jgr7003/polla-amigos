@@ -288,99 +288,146 @@ export default function Home() {
         return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
       })();
 
-      const ARCHIVED_TTL = 24 * 60 * 60 * 1000; // 24h — past days never change
-      const ACTIVE_TTL   =  5 * 60 * 1000;       // 5 min — today's live scores refresh quickly
+      const ACTIVE_TTL = 5 * 60 * 1000; // 5 min — today's live scores refresh quickly
 
-      // --- Read both caches ---
-      let archivedMatches: Match[] | null = null;
-      let activeMatches: Match[]   | null = null;
-      let activeCacheTime: number  | null = null;
-
-      try {
-        const str  = localStorage.getItem("polla_archived_cache");
-        const time = localStorage.getItem("polla_archived_cache_time");
-        if (str && time && (Date.now() - parseInt(time, 10)) <= ARCHIVED_TTL) {
-          archivedMatches = JSON.parse(str) as Match[];
-        }
-      } catch (e) { console.error("Error reading archived cache:", e); }
+      // --- Read caches ---
+      let cachedArchived: Match[] | null = null;
+      let cachedActive: Match[] | null = null;
+      let lastCacheTime: number | null = null;
 
       try {
-        const str  = localStorage.getItem("polla_active_cache");
-        const time = localStorage.getItem("polla_active_cache_time");
-        if (str && time) {
-          activeCacheTime = parseInt(time, 10);
-          if ((Date.now() - activeCacheTime) <= ACTIVE_TTL) {
-            activeMatches = JSON.parse(str) as Match[];
-          }
-        }
-      } catch (e) { console.error("Error reading active cache:", e); }
+        const archivedStr = localStorage.getItem("polla_archived_cache");
+        const activeStr = localStorage.getItem("polla_active_cache");
+        const timeStr = localStorage.getItem("polla_active_cache_time"); // Unified cache timestamp
 
-      // Both caches valid → check if admin updated scores since last fetch
-      if (archivedMatches && activeMatches) {
+        if (archivedStr && activeStr && timeStr) {
+          cachedArchived = JSON.parse(archivedStr) as Match[];
+          cachedActive = JSON.parse(activeStr) as Match[];
+          lastCacheTime = parseInt(timeStr, 10);
+        }
+      } catch (e) {
+        console.error("Error reading matches cache:", e);
+      }
+
+      // Helper to execute a full fetch and update cache
+      const performFullFetch = async () => {
+        setMatchesSyncing(true);
         try {
-          const versionSnap = await getDoc(doc(db, "meta", "matches_version"));
-          const serverUpdatedAt: number = versionSnap.exists() ? (versionSnap.data().updatedAt ?? 0) : 0;
-          if (serverUpdatedAt > activeCacheTime!) {
-            // Admin updated scores — invalidate active cache and re-fetch
-            activeMatches = null;
-          }
-        } catch (e) {
-          // Non-critical: ignore version check errors, serve from cache
-          console.warn("Could not check matches_version:", e);
-        }
-      }
-
-      // Both caches valid and not stale → 0 Firestore reads
-      if (archivedMatches && activeMatches) {
-        const merged = [...archivedMatches, ...activeMatches].sort((a, b) => a.num - b.num);
-        setMatches(merged);
-        setLastMatchesUpdate(activeCacheTime!);
-        return;
-      }
-
-      // --- Need to fetch from Firestore ---
-      setMatchesSyncing(true);
-      try {
-        if (archivedMatches) {
-          // Archived cache still valid — only fetch today + future (~4–8 docs)
-          const qActive = query(
-            collection(db, "matches"),
-            where("date", ">=", todayStr)
-          );
-          const snap = await getDocs(qActive);
-          const freshActive: Match[] = [];
-          snap.forEach((d) => freshActive.push({ ...d.data() as Match, id: d.id }));
-          freshActive.sort((a, b) => a.num - b.num);
-
-          const now = Date.now();
-          localStorage.setItem("polla_active_cache", JSON.stringify(freshActive));
-          localStorage.setItem("polla_active_cache_time", String(now));
-          setLastMatchesUpdate(now);
-
-          const merged = [...archivedMatches, ...freshActive].sort((a, b) => a.num - b.num);
-          setMatches(merged);
-        } else {
-          // Full fetch (first load or archived cache expired)
           const qAll = query(collection(db, "matches"), orderBy("num", "asc"));
           const snap = await getDocs(qAll);
           const all: Match[] = [];
-          snap.forEach((d) => all.push({ ...d.data() as Match, id: d.id }));
+          snap.forEach((d) => all.push({ ...(d.data() as Match), id: d.id }));
 
-          const archived = all.filter(m => m.date < todayStr);
-          const active   = all.filter(m => m.date >= todayStr);
+          const archived = all.filter((m) => m.date < todayStr);
+          const active = all.filter((m) => m.date >= todayStr);
           const now = Date.now();
 
-          localStorage.setItem("polla_archived_cache",      JSON.stringify(archived));
+          localStorage.setItem("polla_archived_cache", JSON.stringify(archived));
           localStorage.setItem("polla_archived_cache_time", String(now));
-          localStorage.setItem("polla_active_cache",        JSON.stringify(active));
-          localStorage.setItem("polla_active_cache_time",   String(now));
+          localStorage.setItem("polla_active_cache", JSON.stringify(active));
+          localStorage.setItem("polla_active_cache_time", String(now));
           setLastMatchesUpdate(now);
           setMatches(all);
+        } catch (err) {
+          console.error("Error performing full fetch:", err);
+        } finally {
+          setMatchesSyncing(false);
         }
-      } catch (err) {
-        console.error("Error fetching matches from Firestore:", err);
-      } finally {
-        setMatchesSyncing(false);
+      };
+
+      // Helper to parse cache date string
+      const getCacheDateStr = (timestamp: number): string => {
+        const t = new Date(timestamp);
+        return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+      };
+
+      // Check cache validity and fetch accordingly
+      if (cachedArchived && cachedActive && lastCacheTime) {
+        try {
+          // 1. Check if matches version was updated on the server since our cache
+          const versionSnap = await getDoc(doc(db, "meta", "matches_version"));
+          const serverUpdatedAt: number = versionSnap.exists() ? (versionSnap.data().updatedAt ?? 0) : 0;
+
+          if (serverUpdatedAt > lastCacheTime) {
+            // Admin made updates -> force full fetch to ensure we get everything (active or archived)
+            await performFullFetch();
+            return;
+          }
+
+          // 2. Check day transition
+          const cacheDateStr = getCacheDateStr(lastCacheTime);
+          if (cacheDateStr !== todayStr) {
+            // The day has changed! Matches from yesterday/days since the last fetch are now archived.
+            // We only fetch matches that were active at cacheDateStr to avoid loading the entire database.
+            setMatchesSyncing(true);
+            const qPartial = query(
+              collection(db, "matches"),
+              where("date", ">=", cacheDateStr)
+            );
+            const snap = await getDocs(qPartial);
+            const fetchedMatches: Match[] = [];
+            snap.forEach((d) => fetchedMatches.push({ ...(d.data() as Match), id: d.id }));
+
+            const fetchedArchived = fetchedMatches.filter((m) => m.date < todayStr);
+            const fetchedActive = fetchedMatches.filter((m) => m.date >= todayStr);
+
+            // Filter out any matches from cachedArchived that are in fetchedArchived (to avoid duplicates/stale data)
+            const fetchedArchivedIds = new Set(fetchedArchived.map((m) => m.id));
+            const newArchived = [
+              ...cachedArchived.filter((m) => !fetchedArchivedIds.has(m.id)),
+              ...fetchedArchived
+            ].sort((a, b) => a.num - b.num);
+
+            const now = Date.now();
+            localStorage.setItem("polla_archived_cache", JSON.stringify(newArchived));
+            localStorage.setItem("polla_archived_cache_time", String(now));
+            localStorage.setItem("polla_active_cache", JSON.stringify(fetchedActive));
+            localStorage.setItem("polla_active_cache_time", String(now));
+            setLastMatchesUpdate(now);
+
+            const merged = [...newArchived, ...fetchedActive].sort((a, b) => a.num - b.num);
+            setMatches(merged);
+            setMatchesSyncing(false);
+            return;
+          }
+
+          // 3. Regular active TTL check (same day)
+          if (Date.now() - lastCacheTime > ACTIVE_TTL) {
+            // Active matches expired but day is the same -> fetch today's and future matches
+            setMatchesSyncing(true);
+            const qActive = query(
+              collection(db, "matches"),
+              where("date", ">=", todayStr)
+            );
+            const snap = await getDocs(qActive);
+            const freshActive: Match[] = [];
+            snap.forEach((d) => freshActive.push({ ...(d.data() as Match), id: d.id }));
+            freshActive.sort((a, b) => a.num - b.num);
+
+            const now = Date.now();
+            localStorage.setItem("polla_active_cache", JSON.stringify(freshActive));
+            localStorage.setItem("polla_active_cache_time", String(now));
+            setLastMatchesUpdate(now);
+
+            const merged = [...cachedArchived, ...freshActive].sort((a, b) => a.num - b.num);
+            setMatches(merged);
+            setMatchesSyncing(false);
+            return;
+          }
+
+          // Both caches valid and day matches -> load from cache (0 Firestore reads)
+          const merged = [...cachedArchived, ...cachedActive].sort((a, b) => a.num - b.num);
+          setMatches(merged);
+          setLastMatchesUpdate(lastCacheTime);
+        } catch (e) {
+          console.warn("Could not validate cache, falling back to cache contents:", e);
+          const merged = [...cachedArchived, ...cachedActive].sort((a, b) => a.num - b.num);
+          setMatches(merged);
+          setLastMatchesUpdate(lastCacheTime);
+        }
+      } else {
+        // Caches don't exist -> do a full fetch
+        await performFullFetch();
       }
     };
 
