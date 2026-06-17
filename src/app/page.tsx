@@ -279,7 +279,7 @@ export default function Home() {
     setPredictionDrafts({});
 
     // 1. Sync Matches (with caching for regular users)
-    let unsubMatches = () => {};
+    let unsubMatches = () => { };
     const isAdmin = profile?.isAdmin === true;
     const cacheTTL = 12 * 60 * 60 * 1000; // 12 hours
 
@@ -435,27 +435,47 @@ export default function Home() {
     if (isAdmin) {
       const qMatches = query(collection(db, "matches"), orderBy("num", "asc"));
       unsubMatches = onSnapshot(qMatches, (snapshot) => {
-        const list: Match[] = [];
-        const adminDrafts: { [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } } = {};
-        snapshot.forEach((doc) => {
-          const m = doc.data() as Match;
-          list.push({ ...m, id: doc.id });
-          if (m.result) {
-            adminDrafts[doc.id] = {
-              goals1: String(m.result.goals1),
-              goals2: String(m.result.goals2),
-              isFinal: m.result.isFinal ?? true
-            };
-          } else {
-            adminDrafts[doc.id] = {
-              goals1: "",
-              goals2: "",
-              isFinal: true
-            };
-          }
+        const changes = snapshot.docChanges();
+
+        // On the initial load all docs arrive as "added" — build the full list once
+        if (changes.length === snapshot.docs.length && changes.every(c => c.type === "added")) {
+          const list: Match[] = [];
+          const adminDrafts: { [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } } = {};
+          snapshot.forEach((doc) => {
+            const m = doc.data() as Match;
+            list.push({ ...m, id: doc.id });
+            adminDrafts[doc.id] = m.result
+              ? { goals1: String(m.result.goals1), goals2: String(m.result.goals2), isFinal: m.result.isFinal ?? true }
+              : { goals1: "", goals2: "", isFinal: true };
+          });
+          setMatches(list);
+          setAdminResults((prev) => ({ ...prev, ...adminDrafts }));
+          return;
+        }
+
+        // Subsequent events: patch only the changed docs
+        const adminDraftPatch: { [matchId: string]: { goals1: string; goals2: string; isFinal: boolean } } = {};
+        setMatches(prevMatches => {
+          let updated = [...prevMatches];
+          changes.forEach(change => {
+            const m = { ...change.doc.data() as Match, id: change.doc.id };
+            if (change.type === "added" || change.type === "modified") {
+              const idx = updated.findIndex(x => x.id === m.id);
+              if (idx >= 0) updated[idx] = m; else updated.push(m);
+              adminDraftPatch[m.id] = m.result
+                ? { goals1: String(m.result.goals1), goals2: String(m.result.goals2), isFinal: m.result.isFinal ?? true }
+                : { goals1: "", goals2: "", isFinal: true };
+            } else if (change.type === "removed") {
+              updated = updated.filter(x => x.id !== m.id);
+            }
+          });
+          return updated.sort((a, b) => a.num - b.num);
         });
-        setMatches(list);
-        setAdminResults((prev) => ({ ...prev, ...adminDrafts }));
+        if (Object.keys(adminDraftPatch).length > 0) {
+          setAdminResults(prev => ({ ...prev, ...adminDraftPatch }));
+        }
+      }, (err) => {
+        if (err.code !== "permission-denied") console.error("Admin matches listener error:", err);
       });
     } else {
       loadMatches();
@@ -483,6 +503,8 @@ export default function Home() {
         };
       });
       setPredictionDrafts(drafts);
+    }, (err) => {
+      if (err.code !== "permission-denied") console.error("Predictions listener error:", err);
     });
 
     // 3. Sync Leaderboard / Users
@@ -494,6 +516,9 @@ export default function Home() {
       });
       setLeaderboard(list);
       setDataLoading(false);
+    }, (err) => {
+      if (err.code !== "permission-denied") console.error("Users listener error:", err);
+      setDataLoading(false);
     });
 
     // 4. Sync Groups
@@ -504,6 +529,8 @@ export default function Home() {
         list.push({ ...doc.data() as Group, id: doc.id });
       });
       setGroups(list);
+    }, (err) => {
+      if (err.code !== "permission-denied") console.error("Groups listener error:", err);
     });
 
     return () => {
@@ -541,6 +568,8 @@ export default function Home() {
 
       setAdminUserPredictions(userPreds);
       setAdminUserDrafts(drafts);
+    }, (err) => {
+      if (err.code !== "permission-denied") console.error("Admin user predictions listener error:", err);
     });
 
     return () => {
@@ -654,6 +683,8 @@ export default function Home() {
         }
       });
       setInviteGroup(found);
+    }, (err) => {
+      if (err.code !== "permission-denied") console.error("Invite group listener error:", err);
     });
     return () => unsub();
   }, [inviteGroupCode]);
@@ -849,13 +880,13 @@ export default function Home() {
 
       // Re-split and persist both cache segments
       const archived = list.filter(m => m.date < todayStr);
-      const active   = list.filter(m => m.date >= todayStr);
+      const active = list.filter(m => m.date >= todayStr);
       const now = Date.now();
-      localStorage.setItem("polla_archived_cache",      JSON.stringify(archived));
+      localStorage.setItem("polla_archived_cache", JSON.stringify(archived));
       localStorage.setItem("polla_archived_cache_time", String(now));
-      localStorage.setItem("polla_active_cache",        JSON.stringify(active));
-      localStorage.setItem("polla_active_cache_time",   String(now));
-      localStorage.setItem("polla_last_manual_sync",    String(now));
+      localStorage.setItem("polla_active_cache", JSON.stringify(active));
+      localStorage.setItem("polla_active_cache_time", String(now));
+      localStorage.setItem("polla_last_manual_sync", String(now));
       setMatches(list);
       setLastMatchesUpdate(now);
       showToast("¡Partidos sincronizados desde la base de datos correctamente!", "success");
@@ -951,7 +982,7 @@ export default function Home() {
         if (!userPointsMap[pred.userId]) {
           userPointsMap[pred.userId] = 0;
         }
-        
+
         let isFinal = false;
         if (pred.matchId === matchId) {
           isFinal = draft.isFinal ?? true;
@@ -1020,7 +1051,7 @@ export default function Home() {
         if (!userPointsMap[pred.userId]) {
           userPointsMap[pred.userId] = 0;
         }
-        
+
         const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
         if (isFinal) {
           userPointsMap[pred.userId] += pts;
@@ -1200,7 +1231,7 @@ export default function Home() {
           if (!userPointsMap[pred.userId]) {
             userPointsMap[pred.userId] = 0;
           }
-          
+
           const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
           if (isFinal) {
             userPointsMap[pred.userId] += pts;
@@ -1441,18 +1472,6 @@ export default function Home() {
   }, [filteredMatches]);
 
   const combinedUserGroupedMatches = React.useMemo(() => {
-    console.log("DEBUG matches:", {
-      hidePastMatches,
-      filteredMatches: filteredMatches.map(m => ({
-        id: m.id,
-        num: m.num,
-        team1: m.team1,
-        team2: m.team2,
-        result: m.result,
-        isArchived: isArchivedMatch(m),
-        isFromPreviousDay: isFromPreviousDay(m)
-      }))
-    });
     // 1. Group active matches (oldest to newest)
     const activeSorted = [...filteredMatches.filter(m => !isArchivedMatch(m))].sort((a, b) => {
       const dateA = getMatchStartDate(a).getTime();
@@ -1996,6 +2015,7 @@ export default function Home() {
                               const hasResult = match.result != null;
                               const isFinal = match.result != null && match.result.isFinal !== false;
                               const isLive = hasMatchStarted(match) && (match.result == null || match.result.isFinal === false);
+                              const isLocked = hasResult || hasMatchStarted(match);
 
                               const matchDate = getMatchStartDate(match);
                               const localTimeStr = matchDate.toLocaleTimeString(undefined, {
@@ -2010,16 +2030,16 @@ export default function Home() {
                                   key={match.id}
                                   className={`bg-slate-900/40 hover:bg-slate-900/60 transition-all border border-slate-900/80 hover:border-slate-800 rounded-2xl p-5 flex flex-col justify-between ${group.isArchived ? "opacity-80 border-slate-950/60" : ""}`}
                                 >
-                                {/* Match Header */}
-                                <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4 relative">
-                                  <span className="font-bold text-emerald-500">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
-                                  {isLive && (
-                                    <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5">
-                                      <span className="text-[10px] sm:text-xs bg-amber-500/15 border border-amber-500/30 text-amber-500 px-2.5 py-1 rounded-lg font-extrabold flex items-center gap-1.5 animate-pulse">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
-                                        ⚡ En Juego
-                                      </span>
-                                      <button
+                                  {/* Match Header */}
+                                  <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4 relative">
+                                    <span className="font-bold text-emerald-500">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
+                                    {isLive && (
+                                      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+                                        <span className="text-[10px] sm:text-xs bg-amber-500/15 border border-amber-500/30 text-amber-500 px-2.5 py-1 rounded-lg font-extrabold flex items-center gap-1.5 animate-pulse">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                                          ⚡ En Juego
+                                        </span>
+                                        {/* <button
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           forceSyncMatches();
@@ -2033,185 +2053,257 @@ export default function Home() {
                                         ) : (
                                           <span className="text-[10px]">🔄</span>
                                         )}
-                                      </button>
+                                      </button> */}
+                                      </div>
+                                    )}
+                                    <span className="font-semibold text-slate-300">{localTimeStr} {tzAbbr}</span>
+                                  </div>
+
+                                  {/* Teams and Inputs */}
+                                  <div className="flex items-center justify-between gap-3 my-4">
+                                    {/* Team 1 */}
+                                    <div className="flex-1 flex flex-col items-center justify-center space-y-1.5 min-w-0">
+                                      {getFlagUrl(match.team1) && (
+                                        <img
+                                          src={getFlagUrl(match.team1)!}
+                                          alt={match.team1}
+                                          className="w-8 h-5.5 object-cover rounded-sm shadow-md border border-slate-900 shrink-0"
+                                        />
+                                      )}
+                                      <span className="font-bold text-xs sm:text-sm text-slate-200 text-center w-full break-words">
+                                        {match.team1}
+                                      </span>
                                     </div>
-                                  )}
-                                  <span className="font-semibold text-slate-300">{localTimeStr} {tzAbbr}</span>
-                                </div>
 
-                                {/* Teams and Inputs */}
-                                <div className="flex items-center justify-between gap-3 my-4">
-                                  {/* Team 1 */}
-                                  <div className="flex-1 flex flex-col items-center justify-center space-y-1.5 min-w-0">
-                                    {getFlagUrl(match.team1) && (
-                                      <img
-                                        src={getFlagUrl(match.team1)!}
-                                        alt={match.team1}
-                                        className="w-8 h-5.5 object-cover rounded-sm shadow-md border border-slate-900 shrink-0"
-                                      />
-                                    )}
-                                    <span className="font-bold text-xs sm:text-sm text-slate-200 text-center w-full break-words">
-                                      {match.team1}
+                                    {/* Prediction / Score inputs */}
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <div className="flex flex-col sm:flex-row items-center gap-1">
+                                        {!isLocked && (
+                                          <button
+                                            type="button"
+                                            disabled={hasResult || isSaving || hasMatchStarted(match)}
+                                            onClick={() => {
+                                              const current = draft.goals1 === "" ? 0 : parseInt(draft.goals1, 10);
+                                              const newVal = Math.max(0, isNaN(current) ? 0 : current - 1);
+                                              setPredictionDrafts(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals1: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-3 sm:order-1"
+                                          >
+                                            -
+                                          </button>
+                                        )}
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          pattern="[0-9]*"
+                                          value={draft.goals1}
+                                          disabled={hasResult || isSaving || hasMatchStarted(match)}
+                                          onChange={(e) => {
+                                            const val = e.target.value.replace(/[^0-9]/g, "");
+                                            setPredictionDrafts(prev => ({
+                                              ...prev,
+                                              [match.id]: { ...draft, goals1: val }
+                                            }));
+                                          }}
+                                          className="w-9 h-9 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-sm font-extrabold rounded-lg focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400 order-2"
+                                          placeholder="-"
+                                        />
+                                        {!isLocked && (
+                                          <button
+                                            type="button"
+                                            disabled={hasResult || isSaving || hasMatchStarted(match)}
+                                            onClick={() => {
+                                              const current = draft.goals1 === "" ? -1 : parseInt(draft.goals1, 10);
+                                              const newVal = (isNaN(current) ? -1 : current) + 1;
+                                              setPredictionDrafts(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals1: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-1 sm:order-3"
+                                          >
+                                            +
+                                          </button>
+                                        )}
+                                      </div>
+                                      <span className="text-slate-655 font-bold">vs</span>
+                                      <div className="flex flex-col sm:flex-row items-center gap-1">
+                                        {!isLocked && (
+                                          <button
+                                            type="button"
+                                            disabled={hasResult || isSaving || hasMatchStarted(match)}
+                                            onClick={() => {
+                                              const current = draft.goals2 === "" ? 0 : parseInt(draft.goals2, 10);
+                                              const newVal = Math.max(0, isNaN(current) ? 0 : current - 1);
+                                              setPredictionDrafts(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals2: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-3 sm:order-1"
+                                          >
+                                            -
+                                          </button>
+                                        )}
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          pattern="[0-9]*"
+                                          value={draft.goals2}
+                                          disabled={hasResult || isSaving || hasMatchStarted(match)}
+                                          onChange={(e) => {
+                                            const val = e.target.value.replace(/[^0-9]/g, "");
+                                            setPredictionDrafts(prev => ({
+                                              ...prev,
+                                              [match.id]: { ...draft, goals2: val }
+                                            }));
+                                          }}
+                                          className="w-9 h-9 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-sm font-extrabold rounded-lg focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400 order-2"
+                                          placeholder="-"
+                                        />
+                                        {!isLocked && (
+                                          <button
+                                            type="button"
+                                            disabled={hasResult || isSaving || hasMatchStarted(match)}
+                                            onClick={() => {
+                                              const current = draft.goals2 === "" ? -1 : parseInt(draft.goals2, 10);
+                                              const newVal = (isNaN(current) ? -1 : current) + 1;
+                                              setPredictionDrafts(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals2: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-1 sm:order-3"
+                                          >
+                                            +
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Team 2 */}
+                                    <div className="flex-1 flex flex-col items-center justify-center space-y-1.5 min-w-0">
+                                      {getFlagUrl(match.team2) && (
+                                        <img
+                                          src={getFlagUrl(match.team2)!}
+                                          alt={match.team2}
+                                          className="w-8 h-5.5 object-cover rounded-sm shadow-md border border-slate-900 shrink-0"
+                                        />
+                                      )}
+                                      <span className="font-bold text-xs sm:text-sm text-slate-200 text-center w-full break-words">
+                                        {match.team2}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Match Footer */}
+                                  <div className="mt-4 pt-3 border-t border-slate-950/60 flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-500 truncate max-w-[150px]">
+                                      {match.ground}
                                     </span>
-                                  </div>
+                                    {(() => {
+                                      const isFinal = match.result != null && match.result.isFinal !== false;
+                                      const isLive = hasMatchStarted(match) && (match.result == null || match.result.isFinal === false);
 
-                                  {/* Prediction / Score inputs */}
-                                  <div className="flex items-center space-x-2 shrink-0">
-                                    <input
-                                      type="text"
-                                      inputMode="numeric"
-                                      pattern="[0-9]*"
-                                      value={draft.goals1}
-                                      disabled={hasResult || isSaving || hasMatchStarted(match)}
-                                      onChange={(e) => {
-                                        const val = e.target.value.replace(/[^0-9]/g, "");
-                                        setPredictionDrafts(prev => ({
-                                          ...prev,
-                                          [match.id]: { ...draft, goals1: val }
-                                        }));
-                                      }}
-                                      className="w-12 h-12 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-lg font-extrabold rounded-xl focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
-                                      placeholder="-"
-                                    />
-                                    <span className="text-slate-655 font-bold">vs</span>
-                                    <input
-                                      type="text"
-                                      inputMode="numeric"
-                                      pattern="[0-9]*"
-                                      value={draft.goals2}
-                                      disabled={hasResult || isSaving || hasMatchStarted(match)}
-                                      onChange={(e) => {
-                                        const val = e.target.value.replace(/[^0-9]/g, "");
-                                        setPredictionDrafts(prev => ({
-                                          ...prev,
-                                          [match.id]: { ...draft, goals2: val }
-                                        }));
-                                      }}
-                                      className="w-12 h-12 text-center bg-slate-950 border border-slate-800 focus:border-emerald-500 text-lg font-extrabold rounded-xl focus:outline-none disabled:opacity-60 disabled:bg-slate-900/30 text-emerald-400"
-                                      placeholder="-"
-                                    />
-                                  </div>
-
-                                  {/* Team 2 */}
-                                  <div className="flex-1 flex flex-col items-center justify-center space-y-1.5 min-w-0">
-                                    {getFlagUrl(match.team2) && (
-                                      <img
-                                        src={getFlagUrl(match.team2)!}
-                                        alt={match.team2}
-                                        className="w-8 h-5.5 object-cover rounded-sm shadow-md border border-slate-900 shrink-0"
-                                      />
-                                    )}
-                                    <span className="font-bold text-xs sm:text-sm text-slate-200 text-center w-full break-words">
-                                      {match.team2}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Match Footer */}
-                                <div className="mt-4 pt-3 border-t border-slate-950/60 flex items-center justify-between">
-                                  <span className="text-[10px] text-slate-500 truncate max-w-[150px]">
-                                    {match.ground}
-                                  </span>
-                                  {(() => {
-                                    const isFinal = match.result != null && match.result.isFinal !== false;
-                                    const isLive = hasMatchStarted(match) && (match.result == null || match.result.isFinal === false);
-
-                                    if (isFinal) {
-                                      return (
-                                        <div className="flex items-center space-x-2">
-                                          <span className="text-xs bg-slate-950 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-lg">
-                                            Final: {match.result?.goals1} - {match.result?.goals2}
-                                          </span>
-                                          {pred ? (
-                                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 5
-                                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                              : (pred?.points ?? 0) === 3
-                                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                                : (pred?.points ?? 0) === 2
-                                                  ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                                  : (pred?.points ?? 0) === 1
-                                                    ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
-                                                    : "bg-slate-800 text-slate-500 border-transparent"
-                                              }`}>
-                                              +{pred?.points ?? 0} Pts
+                                      if (isFinal) {
+                                        return (
+                                          <div className="flex items-center space-x-2">
+                                            <span className="text-xs bg-slate-950 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-lg">
+                                              Final: {match.result?.goals1} - {match.result?.goals2}
                                             </span>
-                                          ) : (
-                                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
-                                              Sin pronóstico
-                                            </span>
-                                          )}
-                                        </div>
-                                      );
-                                    }
-
-                                    if (isLive) {
-                                      const liveGoals1 = match.result ? match.result.goals1 : 0;
-                                      const liveGoals2 = match.result ? match.result.goals2 : 0;
-                                      const currentPoints = pred ? calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2) : 0;
-
-                                      return (
-                                        <div className="flex items-center space-x-2">
-                                          <div className="inline-flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden whitespace-nowrap">
-                                            <span className="text-xs text-slate-100 font-bold px-3 py-1.5">
-                                              En Vivo: <span className="text-amber-400 font-extrabold">{liveGoals1} - {liveGoals2}</span>
-                                            </span>
-                                            <div className="w-px h-6 bg-slate-800"></div>
-                                            <button
-                                              onClick={() => refreshLiveMatchScore(match.id)}
-                                              disabled={refreshingMatches[match.id]}
-                                              title="Actualizar marcador"
-                                              className="px-2.5 py-1.5 hover:bg-slate-900 text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50 flex items-center justify-center cursor-pointer"
-                                            >
-                                              <svg
-                                                className={`w-3.5 h-3.5 ${refreshingMatches[match.id] ? "animate-spin text-amber-500" : ""}`}
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="2.5"
-                                                viewBox="0 0 24 24"
-                                              >
-                                                <path
-                                                  strokeLinecap="round"
-                                                  strokeLinejoin="round"
-                                                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
-                                                />
-                                              </svg>
-                                            </button>
+                                            {pred ? (
+                                              <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 5
+                                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                                : (pred?.points ?? 0) === 3
+                                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                                  : (pred?.points ?? 0) === 2
+                                                    ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                                    : (pred?.points ?? 0) === 1
+                                                      ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                                                      : "bg-slate-800 text-slate-500 border-transparent"
+                                                }`}>
+                                                +{pred?.points ?? 0} Pts
+                                              </span>
+                                            ) : (
+                                              <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
+                                                Sin pronóstico
+                                              </span>
+                                            )}
                                           </div>
-                                          {pred ? (
-                                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
-                                              currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                              currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                              currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                              currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                              "bg-slate-800 text-slate-505 border border-transparent"
-                                            }`}>
-                                              +{currentPoints} Pts (Prov.)
-                                            </span>
-                                          ) : (
-                                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
-                                              Sin pronóstico
-                                            </span>
-                                          )}
-                                        </div>
-                                      );
-                                    }
+                                        );
+                                      }
 
-                                    return (
-                                      <button
-                                        onClick={() => savePrediction(match.id)}
-                                        disabled={isSaving || draft.goals1 === "" || draft.goals2 === ""}
-                                        className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-850 disabled:text-slate-600 disabled:border-slate-800/80 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md active:scale-[0.95]"
-                                      >
-                                        {isSaving ? "Guardando..." : pred ? "Actualizar" : "Guardar"}
-                                      </button>
-                                    );
-                                  })()}
+                                      if (isLive) {
+                                        const liveGoals1 = match.result ? match.result.goals1 : 0;
+                                        const liveGoals2 = match.result ? match.result.goals2 : 0;
+                                        const currentPoints = pred ? calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2) : 0;
+
+                                        return (
+                                          <div className="flex items-center space-x-2">
+                                            <div className="inline-flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden whitespace-nowrap">
+                                              <span className="text-xs text-slate-100 font-bold px-3 py-1.5">
+                                                En Vivo: <span className="text-amber-400 font-extrabold">{liveGoals1} - {liveGoals2}</span>
+                                              </span>
+                                              <div className="w-px h-6 bg-slate-800"></div>
+                                              <button
+                                                onClick={() => refreshLiveMatchScore(match.id)}
+                                                disabled={refreshingMatches[match.id]}
+                                                title="Actualizar marcador"
+                                                className="px-2.5 py-1.5 hover:bg-slate-900 text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50 flex items-center justify-center cursor-pointer"
+                                              >
+                                                <svg
+                                                  className={`w-3.5 h-3.5 ${refreshingMatches[match.id] ? "animate-spin text-amber-500" : ""}`}
+                                                  fill="none"
+                                                  stroke="currentColor"
+                                                  strokeWidth="2.5"
+                                                  viewBox="0 0 24 24"
+                                                >
+                                                  <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                                                  />
+                                                </svg>
+                                              </button>
+                                            </div>
+                                            {pred ? (
+                                              <span className={`text-xs font-bold px-2 py-1 rounded-lg ${currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                                  currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                                    currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                                                      currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                                        "bg-slate-800 text-slate-505 border border-transparent"
+                                                }`}>
+                                                +{currentPoints} Pts (Prov.)
+                                              </span>
+                                            ) : (
+                                              <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-950 border border-slate-850/80 text-rose-500">
+                                                Sin pronóstico
+                                              </span>
+                                            )}
+                                          </div>
+                                        );
+                                      }
+
+                                      return (
+                                        <button
+                                          onClick={() => savePrediction(match.id)}
+                                          disabled={isSaving || draft.goals1 === "" || draft.goals2 === ""}
+                                          className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-850 disabled:text-slate-600 disabled:border-slate-800/80 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md active:scale-[0.95]"
+                                        >
+                                          {isSaving ? "Guardando..." : pred ? "Actualizar" : "Guardar"}
+                                        </button>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </React.Fragment>
-                      ); })
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -2563,38 +2655,104 @@ export default function Home() {
                                         <span className="text-[10px] text-slate-500">{match.ground} • {localTimeStr} {tzAbbr}</span>
                                       </div>
 
-                                      <div className="flex items-center space-x-3">
-                                        <input
-                                          type="text"
-                                          inputMode="numeric"
-                                          pattern="[0-9]*"
-                                          value={draft.goals1}
-                                          onChange={(e) => {
-                                            const val = e.target.value.replace(/[^0-9]/g, "");
-                                            setAdminResults(prev => ({
-                                              ...prev,
-                                              [match.id]: { ...draft, goals1: val }
-                                            }));
-                                          }}
-                                          className="w-12 h-10 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-md font-bold rounded-lg focus:outline-none text-amber-400"
-                                          placeholder={match.result ? String(match.result.goals1) : "-"}
-                                        />
+                                      <div className="flex items-center gap-3">
+                                        <div className="flex flex-col sm:flex-row items-center gap-1">
+                                          <button
+                                            type="button"
+                                            disabled={isSaving}
+                                            onClick={() => {
+                                              const current = draft.goals1 === "" ? 0 : parseInt(draft.goals1, 10);
+                                              const newVal = Math.max(0, isNaN(current) ? 0 : current - 1);
+                                              setAdminResults(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals1: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-3 sm:order-1"
+                                          >
+                                            -
+                                          </button>
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            value={draft.goals1}
+                                            disabled={isSaving}
+                                            onChange={(e) => {
+                                              const val = e.target.value.replace(/[^0-9]/g, "");
+                                              setAdminResults(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals1: val }
+                                              }));
+                                            }}
+                                            className="w-9 h-9 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-sm font-bold rounded-lg focus:outline-none text-amber-400 order-2"
+                                            placeholder={match.result ? String(match.result.goals1) : "-"}
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={isSaving}
+                                            onClick={() => {
+                                              const current = draft.goals1 === "" ? -1 : parseInt(draft.goals1, 10);
+                                              const newVal = (isNaN(current) ? -1 : current) + 1;
+                                              setAdminResults(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals1: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-1 sm:order-3"
+                                          >
+                                            +
+                                          </button>
+                                        </div>
                                         <span className="text-slate-600 font-bold">vs</span>
-                                        <input
-                                          type="text"
-                                          inputMode="numeric"
-                                          pattern="[0-9]*"
-                                          value={draft.goals2}
-                                          onChange={(e) => {
-                                            const val = e.target.value.replace(/[^0-9]/g, "");
-                                            setAdminResults(prev => ({
-                                              ...prev,
-                                              [match.id]: { ...draft, goals2: val }
-                                            }));
-                                          }}
-                                          className="w-12 h-10 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-md font-bold rounded-lg focus:outline-none text-amber-400"
-                                          placeholder={match.result ? String(match.result.goals2) : "-"}
-                                        />
+                                        <div className="flex flex-col sm:flex-row items-center gap-1">
+                                          <button
+                                            type="button"
+                                            disabled={isSaving}
+                                            onClick={() => {
+                                              const current = draft.goals2 === "" ? 0 : parseInt(draft.goals2, 10);
+                                              const newVal = Math.max(0, isNaN(current) ? 0 : current - 1);
+                                              setAdminResults(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals2: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-3 sm:order-1"
+                                          >
+                                            -
+                                          </button>
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            value={draft.goals2}
+                                            disabled={isSaving}
+                                            onChange={(e) => {
+                                              const val = e.target.value.replace(/[^0-9]/g, "");
+                                              setAdminResults(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals2: val }
+                                              }));
+                                            }}
+                                            className="w-9 h-9 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-sm font-bold rounded-lg focus:outline-none text-amber-400 order-2"
+                                            placeholder={match.result ? String(match.result.goals2) : "-"}
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={isSaving}
+                                            onClick={() => {
+                                              const current = draft.goals2 === "" ? -1 : parseInt(draft.goals2, 10);
+                                              const newVal = (isNaN(current) ? -1 : current) + 1;
+                                              setAdminResults(prev => ({
+                                                ...prev,
+                                                [match.id]: { ...draft, goals2: String(newVal) }
+                                              }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-1 sm:order-3"
+                                          >
+                                            +
+                                          </button>
+                                        </div>
 
                                         <label className="flex items-center space-x-1.5 cursor-pointer select-none text-xs text-slate-300">
                                           <input
@@ -2777,42 +2935,104 @@ export default function Home() {
                                               </span>
                                             )}
                                           </div>
-                                        </div>
-
-                                        {/* Inputs and Save Buttons */}
-                                        <div className="flex items-center space-x-3 self-end md:self-center">
-                                          <div className="flex items-center space-x-1.5">
-                                            <input
-                                              type="text"
-                                              inputMode="numeric"
-                                              pattern="[0-9]*"
-                                              value={draft.goals1}
-                                              onChange={(e) => {
-                                                const val = e.target.value.replace(/[^0-9]/g, "");
-                                                setAdminUserDrafts(prev => ({
-                                                  ...prev,
-                                                  [match.id]: { ...draft, goals1: val }
-                                                }));
-                                              }}
-                                              className="w-12 h-10 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-md font-bold rounded-lg focus:outline-none text-slate-200"
-                                              placeholder={pred ? String(pred.goals1) : "-"}
-                                            />
+                                          <div className="flex items-center gap-1.5">
+                                            <div className="flex flex-col sm:flex-row items-center gap-1">
+                                              <button
+                                                type="button"
+                                                disabled={isSaving}
+                                                onClick={() => {
+                                                  const current = draft.goals1 === "" ? 0 : parseInt(draft.goals1, 10);
+                                                  const newVal = Math.max(0, isNaN(current) ? 0 : current - 1);
+                                                  setAdminUserDrafts(prev => ({
+                                                    ...prev,
+                                                    [match.id]: { ...draft, goals1: String(newVal) }
+                                                  }));
+                                                }}
+                                                className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-3 sm:order-1"
+                                              >
+                                                -
+                                              </button>
+                                              <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                pattern="[0-9]*"
+                                                value={draft.goals1}
+                                                disabled={isSaving}
+                                                onChange={(e) => {
+                                                  const val = e.target.value.replace(/[^0-9]/g, "");
+                                                  setAdminUserDrafts(prev => ({
+                                                    ...prev,
+                                                    [match.id]: { ...draft, goals1: val }
+                                                  }));
+                                                }}
+                                                className="w-9 h-9 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-sm font-bold rounded-lg focus:outline-none text-slate-200 order-2"
+                                                placeholder={pred ? String(pred.goals1) : "-"}
+                                              />
+                                              <button
+                                                type="button"
+                                                disabled={isSaving}
+                                                onClick={() => {
+                                                  const current = draft.goals1 === "" ? -1 : parseInt(draft.goals1, 10);
+                                                  const newVal = (isNaN(current) ? -1 : current) + 1;
+                                                  setAdminUserDrafts(prev => ({
+                                                    ...prev,
+                                                    [match.id]: { ...draft, goals1: String(newVal) }
+                                                  }));
+                                                }}
+                                                className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-1 sm:order-3"
+                                              >
+                                                +
+                                              </button>
+                                            </div>
                                             <span className="text-slate-600 font-bold text-xs">vs</span>
-                                            <input
-                                              type="text"
-                                              inputMode="numeric"
-                                              pattern="[0-9]*"
-                                              value={draft.goals2}
-                                              onChange={(e) => {
-                                                const val = e.target.value.replace(/[^0-9]/g, "");
-                                                setAdminUserDrafts(prev => ({
-                                                  ...prev,
-                                                  [match.id]: { ...draft, goals2: val }
-                                                }));
-                                              }}
-                                              className="w-12 h-10 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-md font-bold rounded-lg focus:outline-none text-slate-200"
-                                              placeholder={pred ? String(pred.goals2) : "-"}
-                                            />
+                                            <div className="flex flex-col sm:flex-row items-center gap-1">
+                                              <button
+                                                type="button"
+                                                disabled={isSaving}
+                                                onClick={() => {
+                                                  const current = draft.goals2 === "" ? 0 : parseInt(draft.goals2, 10);
+                                                  const newVal = Math.max(0, isNaN(current) ? 0 : current - 1);
+                                                  setAdminUserDrafts(prev => ({
+                                                    ...prev,
+                                                    [match.id]: { ...draft, goals2: String(newVal) }
+                                                  }));
+                                                }}
+                                                className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-3 sm:order-1"
+                                              >
+                                                -
+                                              </button>
+                                              <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                pattern="[0-9]*"
+                                                value={draft.goals2}
+                                                disabled={isSaving}
+                                                onChange={(e) => {
+                                                  const val = e.target.value.replace(/[^0-9]/g, "");
+                                                  setAdminUserDrafts(prev => ({
+                                                    ...prev,
+                                                    [match.id]: { ...draft, goals2: val }
+                                                  }));
+                                                }}
+                                                className="w-9 h-9 text-center bg-slate-950 border border-slate-800 focus:border-amber-500 text-sm font-bold rounded-lg focus:outline-none text-slate-200 order-2"
+                                                placeholder={pred ? String(pred.goals2) : "-"}
+                                              />
+                                              <button
+                                                type="button"
+                                                disabled={isSaving}
+                                                onClick={() => {
+                                                  const current = draft.goals2 === "" ? -1 : parseInt(draft.goals2, 10);
+                                                  const newVal = (isNaN(current) ? -1 : current) + 1;
+                                                  setAdminUserDrafts(prev => ({
+                                                    ...prev,
+                                                    [match.id]: { ...draft, goals2: String(newVal) }
+                                                  }));
+                                                }}
+                                                className="w-7 h-7 flex items-center justify-center bg-slate-900 border border-slate-800 hover:border-amber-500/40 hover:text-amber-400 text-slate-400 font-extrabold text-sm rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:hover:bg-slate-900 disabled:hover:text-slate-400 select-none cursor-pointer order-1 sm:order-3"
+                                              >
+                                                +
+                                              </button>
+                                            </div>
                                           </div>
 
                                           {/* Points Indicator if match has result */}
@@ -3207,7 +3427,7 @@ export default function Home() {
       {viewingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-955/85 backdrop-blur-md animate-in fade-in duration-200">
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
-            
+
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 shrink-0">
               <div className="space-y-1">
@@ -3219,7 +3439,7 @@ export default function Home() {
                   Total de puntos calculados: <span className="text-emerald-400 font-extrabold">{viewingUser.points} Pts</span>
                 </p>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setViewingUser(null);
                   setViewingUserFilter("started");
@@ -3234,21 +3454,19 @@ export default function Home() {
             <div className="flex gap-2 shrink-0 bg-slate-950/50 p-1 rounded-xl border border-slate-800/60 w-fit">
               <button
                 onClick={() => setViewingUserFilter("started")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  viewingUserFilter === "started"
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewingUserFilter === "started"
                     ? "bg-emerald-500 text-slate-950 shadow-md"
                     : "text-slate-400 hover:text-slate-200"
-                }`}
+                  }`}
               >
                 ⚡ Partidos Iniciados / Finalizados
               </button>
               <button
                 onClick={() => setViewingUserFilter("all")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  viewingUserFilter === "all"
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewingUserFilter === "all"
                     ? "bg-emerald-500 text-slate-950 shadow-md"
                     : "text-slate-400 hover:text-slate-200"
-                }`}
+                  }`}
               >
                 📅 Todos los Partidos
               </button>
@@ -3301,107 +3519,100 @@ export default function Home() {
                   });
                   const tzAbbr = getTzAbbreviation();
 
+                  // Compute live state once for use in layout
+                  const isFinalCard = match.result != null && match.result.isFinal !== false;
+                  const isLiveCard = hasStarted && (match.result == null || match.result.isFinal === false);
+                  const liveGoals1Card = match.result ? match.result.goals1 : 0;
+                  const liveGoals2Card = match.result ? match.result.goals2 : 0;
+
                   return (
-                    <div key={match.id} className="bg-slate-955/45 border border-slate-850 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-955/80 transition-colors">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-center sm:justify-start sm:gap-2">
+                    <div key={match.id} className="bg-slate-955/45 border border-slate-850 rounded-2xl p-4 flex flex-col gap-3 hover:bg-slate-955/80 transition-colors">
+
+                      {/* Top section: round label + badges, team names — all centered */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        {/* Round / group + live badge */}
+                        <div className="flex items-center gap-2 flex-wrap justify-center">
                           <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">
                             {formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}
                           </span>
-                          {(() => {
-                            const isLive = hasStarted && (match.result == null || match.result.isFinal === false);
-                            return isLive ? (
-                              <span className="text-[9px] bg-amber-500/15 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
-                                <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping"></span>
-                                ⚡ En Juego
-                              </span>
-                            ) : null;
-                          })()}
+                          {isLiveCard && (
+                            <span className="text-[9px] bg-amber-500/15 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
+                              <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping"></span>
+                              ⚡ En Juego
+                            </span>
+                          )}
                         </div>
-                        <div className="font-extrabold text-sm text-slate-200 mt-1.5 flex items-center space-x-2 truncate">
+                        {/* Teams */}
+                        <div className="font-extrabold text-sm text-slate-200 flex items-center gap-2 flex-wrap justify-center">
                           {getFlagUrl(match.team1) && (
                             <img src={getFlagUrl(match.team1)!} alt={match.team1} className="w-5 h-3.5 object-cover rounded-sm border border-slate-900 shrink-0" />
                           )}
-                          <span className="truncate">{match.team1}</span>
+                          <span>{match.team1}</span>
                           <span className="text-slate-500 font-bold text-xs shrink-0">vs</span>
-                          <span className="truncate">{match.team2}</span>
+                          <span>{match.team2}</span>
                           {getFlagUrl(match.team2) && (
                             <img src={getFlagUrl(match.team2)!} alt={match.team2} className="w-5 h-3.5 object-cover rounded-sm border border-slate-900 shrink-0" />
                           )}
                         </div>
+                        {/* Time (upcoming) or Final result — centered below teams */}
+                        {!hasStarted && (
+                          <span className="text-[10px] text-slate-500 font-semibold">{localTimeStr} {tzAbbr}</span>
+                        )}
+                        {isFinalCard && (
+                          <span className="text-[11px] bg-slate-900/60 border border-slate-800 text-slate-300 px-2 py-1 rounded-lg font-bold">
+                            Final: {match.result?.goals1} - {match.result?.goals2}
+                          </span>
+                        )}
                       </div>
 
-                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                        {/* Real result indicator */}
-                        {(() => {
-                          const isFinal = match.result != null && match.result.isFinal !== false;
-                          const isLive = hasStarted && (match.result == null || match.result.isFinal === false);
-
-                          if (isFinal) {
-                            return (
-                              <span className="text-[11px] bg-slate-900/60 border border-slate-800 text-slate-300 px-2 py-1 rounded-lg font-bold">
-                                Final: {match.result?.goals1} - {match.result?.goals2}
+                      {/* Bottom row: only shown for started matches — live badge on left, prediction on right */}
+                      {hasStarted && (
+                        <div className="flex items-center justify-center gap-3 flex-wrap">
+                          {/* Live score badge — only shown when match is live */}
+                          {isLiveCard && (
+                            <div className="inline-flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden whitespace-nowrap">
+                              <span className="text-[11px] text-slate-100 font-bold px-2.5 py-1">
+                                En Vivo: <span className="text-amber-400 font-extrabold">{liveGoals1Card} - {liveGoals2Card}</span>
                               </span>
-                            );
-                          }
-
-                          if (isLive) {
-                            const liveGoals1 = match.result ? match.result.goals1 : 0;
-                            const liveGoals2 = match.result ? match.result.goals2 : 0;
-                            return (
-                              <div className="inline-flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden whitespace-nowrap">
-                                <span className="text-[11px] text-slate-100 font-bold px-2.5 py-1">
-                                  En Vivo: <span className="text-amber-400 font-extrabold">{liveGoals1} - {liveGoals2}</span>
-                                </span>
-                                <div className="w-px h-5 bg-slate-800"></div>
-                                <button
-                                  onClick={() => refreshLiveMatchScore(match.id)}
-                                  disabled={refreshingMatches[match.id]}
-                                  title="Actualizar marcador"
-                                  className="px-2 py-1 hover:bg-slate-900 text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50 flex items-center justify-center cursor-pointer"
+                              <div className="w-px h-5 bg-slate-800"></div>
+                              <button
+                                onClick={() => refreshLiveMatchScore(match.id)}
+                                disabled={refreshingMatches[match.id]}
+                                title="Actualizar marcador"
+                                className="px-2 py-1 hover:bg-slate-900 text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50 flex items-center justify-center cursor-pointer"
+                              >
+                                <svg
+                                  className={`w-3.5 h-3.5 ${refreshingMatches[match.id] ? "animate-spin text-amber-500" : ""}`}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  viewBox="0 0 24 24"
                                 >
-                                  <svg
-                                    className={`w-3.5 h-3.5 ${refreshingMatches[match.id] ? "animate-spin text-amber-500" : ""}`}
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2.5"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
-                                    />
-                                  </svg>
-                                </button>
-                              </div>
-                            );
-                          }
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          )}
 
-                          return (
-                            <span className="text-[10px] text-slate-500 font-semibold">{localTimeStr} {tzAbbr}</span>
-                          );
-                        })()}
-
-                        {/* Prediction view */}
-                        <div className="flex items-center gap-2 min-w-[90px] justify-end">
-                          {hasStarted ? (
-                            pred ? (
+                          {/* User prediction + points */}
+                          <div className="flex items-center gap-2">
+                            {pred ? (
                               (() => {
-                                const liveGoals1 = match.result ? match.result.goals1 : 0;
-                                const liveGoals2 = match.result ? match.result.goals2 : 0;
-                                const currentPoints = calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2);
+                                const currentPoints = calculatePoints(pred.goals1, pred.goals2, liveGoals1Card, liveGoals2Card);
                                 return (
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs bg-slate-900 border border-slate-800 text-emerald-450 px-2 py-1 rounded-lg font-bold font-mono">
                                       {pred.goals1} - {pred.goals2}
                                     </span>
-                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                                      currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                      currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                      currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                      currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                      "bg-slate-900 text-slate-500 border-transparent"
+                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                        currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                          currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                                            currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                              "bg-slate-900 text-slate-500 border-transparent"
                                     }`}>
                                       +{currentPoints} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                     </span>
@@ -3410,20 +3621,25 @@ export default function Home() {
                               })()
                             ) : (
                               <span className="text-[10px] text-rose-500 font-bold bg-rose-500/5 px-2.5 py-1 rounded-lg border border-rose-500/10">Sin pronóstico</span>
-                            )
-                          ) : (
-                            <div className="flex items-center gap-1 text-[10px] text-slate-500 bg-slate-900/40 px-2.5 py-1 rounded-lg border border-slate-800/60 font-extrabold uppercase tracking-wider">
-                              <span>🔒 Oculto</span>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
+
+                      {/* Not started: show "locked" badge */}
+                      {!hasStarted && (
+                        <div className="flex justify-end">
+                          <div className="flex items-center gap-1 text-[10px] text-slate-500 bg-slate-900/40 px-2.5 py-1 rounded-lg border border-slate-800/60 font-extrabold uppercase tracking-wider">
+                            <span>🔒 Oculto</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 });
               })()}
             </div>
-            
+
             {/* Modal Footer */}
             <div className="pt-2 border-t border-slate-800 flex justify-end shrink-0">
               <button
@@ -3444,11 +3660,10 @@ export default function Home() {
       {/* Toast Notification */}
       {toast && (
         <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom-5 duration-300">
-          <div className={`px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-2.5 text-xs font-bold ${
-            toast.type === "success" ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/20" :
-            toast.type === "error" ? "bg-rose-950/80 text-rose-400 border-rose-500/20" :
-            "bg-slate-900/80 text-slate-350 border-slate-800"
-          }`}>
+          <div className={`px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-2.5 text-xs font-bold ${toast.type === "success" ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/20" :
+              toast.type === "error" ? "bg-rose-950/80 text-rose-400 border-rose-500/20" :
+                "bg-slate-900/80 text-slate-350 border-slate-800"
+            }`}>
             <span className="text-sm">{toast.type === "success" ? "🏆" : toast.type === "error" ? "❌" : "ℹ️"}</span>
             <span>{toast.message}</span>
             <button
