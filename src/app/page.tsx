@@ -171,7 +171,8 @@ export default function Home() {
     signup,
     logout,
     switchAccount,
-    removeSavedAccount
+    removeSavedAccount,
+    resetPassword
   } = useAuth();
 
   // Ref for scrolling to the members section
@@ -264,6 +265,27 @@ export default function Home() {
       if (err.code === "auth/email-already-in-use") msg = "El correo ya está registrado.";
       if (err.code === "auth/invalid-credential") msg = "Correo o contraseña incorrectos.";
       if (err.code === "auth/weak-password") msg = "La contraseña debe tener al menos 6 caracteres.";
+      setAuthError(err.message || msg);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setAuthError("Por favor ingresa tu correo electrónico primero.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError("");
+    try {
+      await resetPassword(email.trim());
+      showToast(`Se ha enviado un correo para restablecer tu contraseña a: ${email.trim()}`, "success");
+    } catch (err: any) {
+      console.error(err);
+      let msg = "Error al enviar el correo de restablecimiento.";
+      if (err.code === "auth/invalid-email") msg = "Correo electrónico no válido.";
+      if (err.code === "auth/user-not-found") msg = "No existe un usuario con este correo electrónico.";
       setAuthError(err.message || msg);
     } finally {
       setAuthLoading(false);
@@ -1705,7 +1727,18 @@ export default function Home() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">Contraseña</label>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Contraseña</label>
+                {!isRegistering && (
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    className="text-emerald-400 hover:text-emerald-300 text-xs font-semibold focus:outline-none cursor-pointer"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
+                )}
+              </div>
               <input
                 type="password"
                 value={password}

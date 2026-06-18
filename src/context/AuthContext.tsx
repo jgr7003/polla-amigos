@@ -6,7 +6,8 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut, 
-  User 
+  User,
+  sendPasswordResetEmail
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
@@ -36,6 +37,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   switchAccount: (email: string) => Promise<void>;
   removeSavedAccount: (email: string) => void;
+  resetPassword: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -175,6 +177,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSavedAccounts(filtered);
   };
 
+  const resetPassword = async (email: string) => {
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -185,7 +196,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signup, 
       logout, 
       switchAccount, 
-      removeSavedAccount 
+      removeSavedAccount,
+      resetPassword
     }}>
       {children}
     </AuthContext.Provider>
