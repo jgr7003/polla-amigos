@@ -1771,6 +1771,7 @@ export default function Home() {
 
           <div className="mt-6 text-center">
             <button
+              type="button"
               onClick={() => {
                 setIsRegistering(!isRegistering);
                 setAuthError("");
@@ -1781,6 +1782,26 @@ export default function Home() {
             </button>
           </div>
         </div>
+
+        {/* Toast Notification */}
+        {toast && (
+          <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom-5 duration-300">
+            <div className={`px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-2.5 text-xs font-bold ${toast.type === "success" ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/20" :
+              toast.type === "error" ? "bg-rose-950/80 text-rose-400 border-rose-500/20" :
+                "bg-slate-900/80 text-slate-350 border-slate-800"
+              }`}>
+              <span className="text-sm">{toast.type === "success" ? "🏆" : toast.type === "error" ? "❌" : "ℹ️"}</span>
+              <span>{toast.message}</span>
+              <button
+                type="button"
+                onClick={() => setToast(null)}
+                className="ml-2 text-slate-400 hover:text-white transition-colors font-extrabold"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
