@@ -1729,15 +1729,6 @@ export default function Home() {
             <div>
               <div className="flex justify-between items-center mb-1.5">
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Contraseña</label>
-                {!isRegistering && (
-                  <button
-                    type="button"
-                    onClick={handleForgotPassword}
-                    className="text-emerald-400 hover:text-emerald-300 text-xs font-semibold focus:outline-none cursor-pointer"
-                  >
-                    ¿Olvidaste tu contraseña?
-                  </button>
-                )}
               </div>
               <input
                 type="password"
@@ -1748,7 +1739,15 @@ export default function Home() {
                 className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-slate-100 transition-colors"
               />
             </div>
-
+            {!isRegistering && (
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-emerald-400 hover:text-emerald-300 text-xs font-semibold focus:outline-none cursor-pointer"
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
+            )}
             {authError && (
               <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm px-4 py-3 rounded-xl">
                 ⚠️ {authError}
@@ -2304,10 +2303,10 @@ export default function Home() {
                                             </div>
                                             {pred ? (
                                               <span className={`text-xs font-bold px-2 py-1 rounded-lg ${currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                                  currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                                    currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                                      currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                                        "bg-slate-800 text-slate-505 border border-transparent"
+                                                currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                                  currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                                                    currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                                      "bg-slate-800 text-slate-505 border border-transparent"
                                                 }`}>
                                                 +{currentPoints} Pts (Prov.)
                                               </span>
@@ -3488,8 +3487,8 @@ export default function Home() {
               <button
                 onClick={() => setViewingUserFilter("started")}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewingUserFilter === "started"
-                    ? "bg-emerald-500 text-slate-950 shadow-md"
-                    : "text-slate-400 hover:text-slate-200"
+                  ? "bg-emerald-500 text-slate-950 shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
                   }`}
               >
                 ⚡ Partidos Iniciados / Finalizados
@@ -3497,8 +3496,8 @@ export default function Home() {
               <button
                 onClick={() => setViewingUserFilter("all")}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewingUserFilter === "all"
-                    ? "bg-emerald-500 text-slate-950 shadow-md"
-                    : "text-slate-400 hover:text-slate-200"
+                  ? "bg-emerald-500 text-slate-950 shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
                   }`}
               >
                 📅 Todos los Partidos
@@ -3642,11 +3641,11 @@ export default function Home() {
                                       {pred.goals1} - {pred.goals2}
                                     </span>
                                     <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                        currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                          currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                            currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                              "bg-slate-900 text-slate-500 border-transparent"
-                                    }`}>
+                                      currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                        currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                                          currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                                            "bg-slate-900 text-slate-500 border-transparent"
+                                      }`}>
                                       +{currentPoints} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                     </span>
                                   </div>
@@ -3694,8 +3693,8 @@ export default function Home() {
       {toast && (
         <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom-5 duration-300">
           <div className={`px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center gap-2.5 text-xs font-bold ${toast.type === "success" ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/20" :
-              toast.type === "error" ? "bg-rose-950/80 text-rose-400 border-rose-500/20" :
-                "bg-slate-900/80 text-slate-350 border-slate-800"
+            toast.type === "error" ? "bg-rose-950/80 text-rose-400 border-rose-500/20" :
+              "bg-slate-900/80 text-slate-350 border-slate-800"
             }`}>
             <span className="text-sm">{toast.type === "success" ? "🏆" : toast.type === "error" ? "❌" : "ℹ️"}</span>
             <span>{toast.message}</span>
