@@ -48,6 +48,7 @@ const countryCodes: { [key: string]: string } = {
   "Ghana": "gh",
   "Panama": "pa"
 };
+export const availableTeams = Object.keys(countryCodes).sort();
 
 /**
  * Retorna la URL de la bandera del país usando FlagCDN.
