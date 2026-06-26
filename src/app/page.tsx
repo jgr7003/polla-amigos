@@ -162,6 +162,22 @@ const capitalizeFirstLetter = (str: string) => {
   return str.charAt(0).toUpperCase() + str.slice(1);
 };
 
+const getPointsBadgeClass = (points: number): string => {
+  if (points === 5 || points === 10) {
+    return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+  }
+  if (points === 3 || points === 6) {
+    return "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+  }
+  if (points === 2 || points === 4) {
+    return "bg-blue-500/10 text-blue-400 border border-blue-500/20";
+  }
+  if (points === 1) {
+    return "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20";
+  }
+  return "bg-slate-800 text-slate-500 border border-transparent";
+};
+
 export default function Home() {
   const {
     user,
@@ -777,7 +793,7 @@ export default function Home() {
 
       let pts = 0;
       if (match?.result) {
-        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2);
+        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2, match.num);
       }
 
       await setDoc(doc(db, "predictions", predId), {
@@ -949,7 +965,7 @@ export default function Home() {
       const predId = `${user.uid}_${matchId}`;
       let pts = 0;
       if (match?.result) {
-        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2);
+        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2, match.num);
       }
 
       await setDoc(doc(db, "predictions", predId), {
@@ -993,9 +1009,10 @@ export default function Home() {
 
       const updatedUserIds = new Set<string>();
 
+      const match = matches.find(m => m.id === matchId);
       predSnap.forEach((pDoc) => {
         const pred = pDoc.data() as Prediction;
-        const pts = calculatePoints(pred.goals1, pred.goals2, rg1, rg2);
+        const pts = calculatePoints(pred.goals1, pred.goals2, rg1, rg2, match?.num);
         batch.update(doc(db, "predictions", pred.id), { points: pts });
         updatedUserIds.add(pred.userId);
       });
@@ -1071,7 +1088,7 @@ export default function Home() {
 
         let pts = 0;
         if (match && match.result) {
-          pts = calculatePoints(pred.goals1, pred.goals2, match.result.goals1, match.result.goals2);
+          pts = calculatePoints(pred.goals1, pred.goals2, match.result.goals1, match.result.goals2, match.num);
         }
 
         if (pred.points !== pts) {
@@ -1300,7 +1317,7 @@ export default function Home() {
 
           let pts = 0;
           if (match && match.result) {
-            pts = calculatePoints(pred.goals1, pred.goals2, match.result.goals1, match.result.goals2);
+            pts = calculatePoints(pred.goals1, pred.goals2, match.result.goals1, match.result.goals2, match.num);
           }
 
           if (pred.points !== pts) {
@@ -2142,7 +2159,14 @@ export default function Home() {
                                 >
                                   {/* Match Header */}
                                   <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4 relative">
-                                    <span className="font-bold text-emerald-500">{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
+                                    <span className="font-bold text-emerald-500 flex items-center gap-1.5 flex-wrap">
+                                      <span>{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
+                                      {match.num >= 73 && (
+                                        <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
+                                          x2 Puntos
+                                        </span>
+                                      )}
+                                    </span>
                                     {isLive && (
                                       <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5">
                                         <span className="text-[10px] sm:text-xs bg-amber-500/15 border border-amber-500/30 text-amber-500 px-2.5 py-1 rounded-lg font-extrabold flex items-center gap-1.5 animate-pulse">
@@ -2347,16 +2371,7 @@ export default function Home() {
                                               Final: {match.result?.goals1} - {match.result?.goals2}
                                             </span>
                                             {pred ? (
-                                              <span className={`text-xs font-bold px-2 py-1 rounded-lg ${(pred?.points ?? 0) === 5
-                                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                                : (pred?.points ?? 0) === 3
-                                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                                  : (pred?.points ?? 0) === 2
-                                                    ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                                    : (pred?.points ?? 0) === 1
-                                                      ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
-                                                      : "bg-slate-800 text-slate-500 border-transparent"
-                                                }`}>
+                                              <span className={`text-xs font-bold px-2 py-1 rounded-lg ${getPointsBadgeClass(pred?.points ?? 0)}`}>
                                                 +{pred?.points ?? 0} Pts
                                               </span>
                                             ) : (
@@ -2371,7 +2386,7 @@ export default function Home() {
                                       if (isLive) {
                                         const liveGoals1 = match.result ? match.result.goals1 : 0;
                                         const liveGoals2 = match.result ? match.result.goals2 : 0;
-                                        const currentPoints = pred ? calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2) : 0;
+                                        const currentPoints = pred ? calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2, match.num) : 0;
 
                                         return (
                                           <div className="flex items-center space-x-2">
@@ -2402,12 +2417,7 @@ export default function Home() {
                                               </button>
                                             </div>
                                             {pred ? (
-                                              <span className={`text-xs font-bold px-2 py-1 rounded-lg ${currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                                currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                                  currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                                    currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                                      "bg-slate-800 text-slate-505 border border-transparent"
-                                                }`}>
+                                              <span className={`text-xs font-bold px-2 py-1 rounded-lg ${getPointsBadgeClass(currentPoints)}`}>
                                                 +{currentPoints} Pts (Prov.)
                                               </span>
                                             ) : (
@@ -2560,7 +2570,12 @@ export default function Home() {
                     </h3>
                     <p className="text-xs text-slate-400 mt-1">Cómo se calculan los puntos de cada partido:</p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+                    <div className="mt-3 p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-center space-x-2 text-purple-300 text-xs">
+                      <span className="text-sm">⚡</span>
+                      <span><strong>¡Multiplicador x2!</strong> En la fase de eliminación directa (octavos de final en adelante, partido 73+), todos los puntos obtenidos se multiplican x2 (Marcador Exacto: +10 Pts, Resultado: +6 Pts, Marcador Parcial: +2 Pts).</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 font-sans">
                       <div className="flex items-start space-x-3 p-5 rounded-xl bg-slate-950/20 hover:bg-slate-950/40 transition-colors border border-slate-900">
                         <span className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">+5 Pts</span>
                         <div>
@@ -2764,7 +2779,14 @@ export default function Home() {
                                       className="bg-slate-900/40 border border-slate-900/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
                                     >
                                       <div className="flex-1">
-                                        <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
+                                          {match.num >= 73 && (
+                                            <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
+                                              x2 Puntos
+                                            </span>
+                                          )}
+                                        </div>
                                         {editingTeamsMatchId === match.id ? (
                                           <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 mt-1.5 w-full">
                                             {/* Selects Row */}
@@ -3127,7 +3149,14 @@ export default function Home() {
                                       >
                                         {/* Match Team Info */}
                                         <div className="flex-1">
-                                          <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
+                                            {match.num >= 73 && (
+                                              <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
+                                                x2 Puntos
+                                              </span>
+                                            )}
+                                          </div>
                                           <h3 className="font-bold text-slate-200 mt-0.5 flex items-center space-x-2">
                                             {getFlagUrl(match.team1) && (
                                               <img
@@ -3257,16 +3286,7 @@ export default function Home() {
 
                                           {/* Points Indicator if match has result */}
                                           {hasResult && pred && (
-                                            <span className={`text-xs font-bold px-2 py-1.5 rounded-lg border ${pred.points === 5
-                                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                              : pred.points === 3
-                                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                                : pred.points === 2
-                                                  ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                                  : pred.points === 1
-                                                    ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
-                                                    : "bg-slate-800 text-slate-500 border-transparent"
-                                              }`}>
+                                            <span className={`text-xs font-bold px-2 py-1.5 rounded-lg border ${getPointsBadgeClass(pred.points)}`}>
                                               +{pred.points} Pts
                                             </span>
                                           )}
@@ -3752,8 +3772,13 @@ export default function Home() {
                       <div className="flex flex-col items-center gap-1.5">
                         {/* Round / group + live badge */}
                         <div className="flex items-center gap-2 flex-wrap justify-center">
-                          <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">
-                            {formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}
+                          <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+                            <span>{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
+                            {match.num >= 73 && (
+                              <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
+                                x2 Puntos
+                              </span>
+                            )}
                           </span>
                           {isLiveCard && (
                             <span className="text-[9px] bg-amber-500/15 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse">
@@ -3822,18 +3847,13 @@ export default function Home() {
                           <div className="flex items-center gap-2">
                             {pred ? (
                               (() => {
-                                const currentPoints = calculatePoints(pred.goals1, pred.goals2, liveGoals1Card, liveGoals2Card);
+                                const currentPoints = calculatePoints(pred.goals1, pred.goals2, liveGoals1Card, liveGoals2Card, match.num);
                                 return (
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs bg-slate-900 border border-slate-800 text-emerald-450 px-2 py-1 rounded-lg font-bold font-mono">
                                       {pred.goals1} - {pred.goals2}
                                     </span>
-                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${currentPoints === 5 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                      currentPoints === 3 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                        currentPoints === 2 ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                          currentPoints === 1 ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
-                                            "bg-slate-900 text-slate-500 border-transparent"
-                                      }`}>
+                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${getPointsBadgeClass(currentPoints)}`}>
                                       +{currentPoints} Pts {match.result?.isFinal === false ? "(Prov.)" : ""}
                                     </span>
                                   </div>
