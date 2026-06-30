@@ -1,0 +1,68 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Aplicación Next.js (React 19 + Tailwind 4)
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polla-web
+    ports:
+      - "3000:3000"
+    environment:
+      # Pon en "true" para que la app use el emulador local en lugar de la nube.
+      # Requiere el servicio "emulators" levantado (ver perfil abajo).
+      NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true"
+      # Host de los emuladores visto DESDE EL NAVEGADOR (la app es estática y
+      # consulta Firestore/Auth desde el cliente), por eso usa localhost y los
+      # puertos publicados del servicio "emulators".
+      NEXT_PUBLIC_FIREBASE_EMULATOR_HOST: "localhost"
+    volumes:
+      # Montaje del código para hot-reload. node_modules se mantiene dentro del
+      # contenedor (volumen anónimo) para no pisarlo con el del host.
+      - .:/app
+      - /app/node_modules
+    command: npm run dev -- -H 0.0.0.0
+
+  # ---------------------------------------------------------------------------
+  # Modo PRODUCCIÓN: export estático de Next.js servido con Nginx.
+  # Se levanta solo con: docker compose --profile prod up --build
+  # ---------------------------------------------------------------------------
+  web-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      args:
+        # Producción usa Firebase en la nube por defecto.
+        NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "false"
+    container_name: polla-web-prod
+    profiles: ["prod"]
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Firebase Emulator Suite (Firestore + Auth) -- "base de datos" local.
+  # Se levanta solo con: docker compose --profile emulator up
+  # ---------------------------------------------------------------------------
+  emulators:
+    build:
+      context: .
+      dockerfile: Dockerfile.emulators
+    container_name: polla-emulators
+    profiles: ["emulator"]
+    ports:
+      - "4000:4000"   # UI del Emulator Suite
+      - "8082:8082"   # Firestore
+      - "9099:9099"   # Auth
+    volumes:
+      - ./firebase.json:/app/firebase.json:ro
+      - ./firestore.rules:/app/firestore.rules:ro
+      - ./firestore.indexes.json:/app/firestore.indexes.json:ro
+      # Persiste los datos del emulador entre reinicios.
+      - ./emulator-data:/app/emulator-data
+    command: >
+      firebase emulators:start
+      --project polla-amigos-2026-sb
+      --import=/app/emulator-data
+      --export-on-exit=/app/emulator-data
