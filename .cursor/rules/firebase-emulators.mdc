@@ -1,0 +1,12 @@
+---
+description: Convenciones de desarrollo local con Firebase Emulators en Polla Amigos
+alwaysApply: true
+---
+
+# Firebase Emulators — Polla Amigos
+
+- Firestore (`users`, `matches`, etc.) y Firebase Auth son independientes; importar `emulator-data/` solo trae Firestore.
+- El login local requiere usuarios en Auth con el **mismo UID** que `users/{uid}` en Firestore.
+- Activar emulador: `NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true` y `NEXT_PUBLIC_FIREBASE_EMULATOR_HOST=localhost` (ver `src/lib/firebase.ts`).
+- Puertos: Firestore `8082`, Auth `9099`, UI `4000`.
+- Para flujos completos de setup y troubleshooting, leer `.cursor/skills/local-firebase-dev/SKILL.md`.

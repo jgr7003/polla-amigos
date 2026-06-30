@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed:auth-emulator": "node scripts/seed-auth-emulator.js"
   },
   "dependencies": {
     "firebase": "^12.14.0",

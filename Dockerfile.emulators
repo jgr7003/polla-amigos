@@ -1,0 +1,15 @@
+# Imagen para el Firebase Emulator Suite (Firestore + Auth)
+# Los emuladores de Firestore/Auth requieren Java (JRE).
+FROM node:20-bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends default-jre-headless \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install -g firebase-tools
+
+WORKDIR /app
+
+# Puertos: 4000 (UI), 8080 (Firestore), 9099 (Auth)
+EXPOSE 4000 8080 9099
+
+CMD ["firebase", "emulators:start", "--project", "polla-amigos-2026-sb"]

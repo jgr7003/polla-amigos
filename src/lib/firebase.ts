@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 
 const firebaseConfig = {
   projectId: "polla-amigos-2026-sb",
@@ -15,5 +15,18 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// Conexión opcional al Firebase Emulator Suite local (desarrollo con Docker).
+// Activar con NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true. Solo en el navegador y
+// una sola vez (getApps().length === 1 garantiza que es la inicialización).
+if (
+  process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true" &&
+  typeof window !== "undefined" &&
+  getApps().length === 1
+) {
+  const host = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST || "localhost";
+  connectFirestoreEmulator(db, host, 8082);
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+}
 
 export { app, auth, db };
