@@ -16,7 +16,7 @@ import {
   where
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { calculatePoints } from "@/lib/scoreCalculator";
+import { calculatePoints, computeCumulativePoints, type CumulativeMatch } from "@/lib/scoreCalculator";
 import { getFlagUrl, availableTeams } from "@/lib/flags";
 import worldCupData from "./worldcup2026.json";
 
@@ -41,6 +41,10 @@ interface Prediction {
   goals1: number;
   goals2: number;
   points: number;
+  /** Acumulado del usuario ANTES de este partido (solo partidos finalizados). */
+  prevPoints?: number;
+  /** Acumulado DESPUÉS de este partido = prevPoints + points. `null` hasta que el partido finaliza. */
+  afterMatchPoints?: number | null;
 }
 
 interface UserProfile {
@@ -95,6 +99,64 @@ function getMatchStartDate(match: Match): Date {
     console.error("Error parsing match date:", e);
   }
   return new Date(match.date);
+}
+
+/**
+ * Muestra el desglose acumulado de una predicción: cuántos puntos llevaba el
+ * usuario ANTES del partido, los que sumó en él, y cómo quedó DESPUÉS.
+ * Si el partido aún no finaliza, `afterMatchPoints` es null y se muestra un
+ * total provisional (prevPoints + estimado en vivo).
+ */
+function PointsBreakdown({
+  prevPoints,
+  matchPoints,
+  afterMatchPoints,
+  isLive,
+}: {
+  prevPoints?: number;
+  matchPoints: number;
+  afterMatchPoints?: number | null;
+  isLive?: boolean;
+}) {
+  const prev = prevPoints ?? 0;
+  const provisional = afterMatchPoints == null;
+  const after = provisional ? prev + matchPoints : afterMatchPoints;
+  return (
+    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-semibold whitespace-nowrap">
+      <span>Antes <span className="text-slate-300 font-bold tabular-nums">{prev}</span></span>
+      <span className="text-slate-600">·</span>
+      <span className={matchPoints > 0 ? "text-emerald-400 font-bold" : "text-slate-500 font-bold"}>
+        +{matchPoints}
+      </span>
+      <span className="text-slate-600">·</span>
+      <span>
+        Después{" "}
+        <span className={`font-bold tabular-nums ${provisional ? "text-amber-400" : "text-emerald-400"}`}>
+          {after}
+        </span>
+        {provisional && isLive ? " (prov.)" : ""}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Construye la lista de partidos para el cálculo acumulado, asignando a cada
+ * uno su índice cronológico (kickoff, luego número de partido como desempate).
+ */
+function buildCumulativeMatches(ms: Match[]): CumulativeMatch[] {
+  const sorted = [...ms].sort((a, b) => {
+    const dateA = getMatchStartDate(a).getTime();
+    const dateB = getMatchStartDate(b).getTime();
+    if (dateA !== dateB) return dateA - dateB;
+    return a.num - b.num;
+  });
+  return sorted.map((m, i) => ({
+    id: m.id,
+    order: i,
+    group: m.group,
+    result: m.result,
+  }));
 }
 
 function hasMatchStarted(match: Match): boolean {
@@ -793,7 +855,7 @@ export default function Home() {
 
       let pts = 0;
       if (match?.result) {
-        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2, match.num);
+        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2, match.group);
       }
 
       await setDoc(doc(db, "predictions", predId), {
@@ -965,7 +1027,7 @@ export default function Home() {
       const predId = `${user.uid}_${matchId}`;
       let pts = 0;
       if (match?.result) {
-        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2, match.num);
+        pts = calculatePoints(g1, g2, match.result.goals1, match.result.goals2, match.group);
       }
 
       await setDoc(doc(db, "predictions", predId), {
@@ -981,6 +1043,60 @@ export default function Home() {
     } finally {
       setSavingMatches(prev => ({ ...prev, [matchId]: false }));
     }
+  };
+
+  // Recompute the running cumulative points (prevPoints / afterMatchPoints) for
+  // every prediction, walking each user's predictions in chronological order,
+  // and persist both the per-prediction breakdown and each user's total.
+  // The user total is taken from the afterMatchPoints of their last finished
+  // match (== the running total), so the standing is fully explained by the chain.
+  const persistCumulativeScores = async (matchesArr: Match[]) => {
+    const predsSnap = await getDocs(collection(db, "predictions"));
+    const preds: { id: string; data: Prediction }[] = [];
+    const predInputs = predsSnap.docs.map((d) => {
+      const data = d.data() as Prediction;
+      preds.push({ id: d.id, data });
+      return {
+        id: d.id,
+        userId: data.userId,
+        matchId: data.matchId,
+        goals1: data.goals1,
+        goals2: data.goals2,
+      };
+    });
+
+    const { byPrediction, userTotals } = computeCumulativePoints(
+      predInputs,
+      buildCumulativeMatches(matchesArr)
+    );
+
+    const batch = writeBatch(db);
+
+    preds.forEach(({ id, data }) => {
+      const cp = byPrediction.get(id);
+      if (!cp) return;
+      const changed =
+        data.points !== cp.points ||
+        (data.prevPoints ?? null) !== cp.prevPoints ||
+        (data.afterMatchPoints ?? null) !== cp.afterMatchPoints;
+      if (changed) {
+        batch.update(doc(db, "predictions", id), {
+          points: cp.points,
+          prevPoints: cp.prevPoints,
+          afterMatchPoints: cp.afterMatchPoints,
+        });
+      }
+    });
+
+    const usersSnap = await getDocs(collection(db, "users"));
+    usersSnap.forEach((uDoc) => {
+      const uid = uDoc.id;
+      if (uid && uid !== "undefined") {
+        batch.set(doc(db, "users", uid), { points: userTotals.get(uid) || 0 }, { merge: true });
+      }
+    });
+
+    await batch.commit();
   };
 
   // Admin: Set Match Result and Update Scores
@@ -1001,56 +1117,21 @@ export default function Home() {
         result: { goals1: rg1, goals2: rg2, isFinal: draft.isFinal ?? true }
       }, { merge: true });
 
-      // 2. Fetch all predictions for this match (Scoped by matchId)
-      const predSnap = await getDocs(
-        query(collection(db, "predictions"), where("matchId", "==", matchId))
-      );
-      const batch = writeBatch(db);
-
-      const updatedUserIds = new Set<string>();
-
-      const match = matches.find(m => m.id === matchId);
-      predSnap.forEach((pDoc) => {
-        const pred = pDoc.data() as Prediction;
-        const pts = calculatePoints(pred.goals1, pred.goals2, rg1, rg2, match?.num);
-        batch.update(doc(db, "predictions", pred.id), { points: pts });
-        updatedUserIds.add(pred.userId);
+      // 2. Recompute the whole cumulative chain. Editing one result can shift
+      // the prevPoints/afterMatchPoints of every later match for every user, so
+      // we walk all predictions in order rather than touching just this match.
+      // Read matches fresh and overlay the result we just wrote (in case the
+      // fresh read raced the write).
+      const matchesSnap = await getDocs(collection(db, "matches"));
+      const matchesArr: Match[] = matchesSnap.docs.map((d) => {
+        const m = { ...(d.data() as Match), id: d.id };
+        if (d.id === matchId) {
+          m.result = { goals1: rg1, goals2: rg2, isFinal: draft.isFinal ?? true };
+        }
+        return m;
       });
 
-      // Commit predictions updates
-      await batch.commit();
-
-      // 3. Recalculate users points
-      const allPredsSnap = await getDocs(collection(db, "predictions"));
-      const userPointsMap: { [userId: string]: number } = {};
-
-      allPredsSnap.forEach((pDoc) => {
-        const pred = pDoc.data() as Prediction;
-        if (!userPointsMap[pred.userId]) {
-          userPointsMap[pred.userId] = 0;
-        }
-
-        let isFinal = false;
-        if (pred.matchId === matchId) {
-          isFinal = draft.isFinal ?? true;
-        } else {
-          const match = matches.find(m => m.id === pred.matchId);
-          isFinal = match?.result ? (match.result.isFinal ?? true) : false;
-        }
-
-        if (isFinal) {
-          userPointsMap[pred.userId] += pred.points || 0;
-        }
-      });
-
-      // Update users collection
-      const userBatch = writeBatch(db);
-      Object.keys(userPointsMap).forEach((uid) => {
-        if (uid && uid !== "undefined") {
-          userBatch.set(doc(db, "users", uid), { points: userPointsMap[uid] }, { merge: true });
-        }
-      });
-      await userBatch.commit();
+      await persistCumulativeScores(matchesArr);
 
       // Bump matches_version so clients invalidate their active cache on next load
       await setDoc(doc(db, "meta", "matches_version"), { updatedAt: Date.now() }, { merge: true });
@@ -1072,49 +1153,12 @@ export default function Home() {
     setAdminRecalculating(true);
     try {
       const matchesSnap = await getDocs(collection(db, "matches"));
-      const predsSnap = await getDocs(collection(db, "predictions"));
+      const matchesArr: Match[] = matchesSnap.docs.map((d) => ({
+        ...(d.data() as Match),
+        id: d.id,
+      }));
 
-      const matchesMap: { [id: string]: Match } = {};
-      matchesSnap.forEach(doc => {
-        matchesMap[doc.id] = { ...doc.data() as Match, id: doc.id };
-      });
-
-      const userPointsMap: { [userId: string]: number } = {};
-      const batch = writeBatch(db);
-
-      predsSnap.forEach(pDoc => {
-        const pred = pDoc.data() as Prediction;
-        const match = matchesMap[pred.matchId];
-
-        let pts = 0;
-        if (match && match.result) {
-          pts = calculatePoints(pred.goals1, pred.goals2, match.result.goals1, match.result.goals2, match.num);
-        }
-
-        if (pred.points !== pts) {
-          batch.update(doc(db, "predictions", pred.id), { points: pts });
-        }
-
-        if (!userPointsMap[pred.userId]) {
-          userPointsMap[pred.userId] = 0;
-        }
-
-        const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
-        if (isFinal) {
-          userPointsMap[pred.userId] += pts;
-        }
-      });
-
-      const usersSnap = await getDocs(collection(db, "users"));
-      usersSnap.forEach(uDoc => {
-        const uid = uDoc.id;
-        if (uid && uid !== "undefined") {
-          const pts = userPointsMap[uid] || 0;
-          batch.set(doc(db, "users", uid), { points: pts }, { merge: true });
-        }
-      });
-
-      await batch.commit();
+      await persistCumulativeScores(matchesArr);
       alert("¡Todos los puntajes de las predicciones y de los usuarios han sido recalculados y guardados con éxito en la base de datos!");
     } catch (err) {
       console.error("Error recalculating all scores:", err);
@@ -1302,49 +1346,11 @@ export default function Home() {
       }
 
       if (updatedMatchesCount > 0) {
-        // Ejecutar recalculación completa de puntajes en el mismo batch
-        const predsSnap = await getDocs(collection(db, "predictions"));
-        const matchesMap: { [id: string]: Match } = {};
-        dbMatches.forEach(m => {
-          matchesMap[m.id] = m;
-        });
-
-        const userPointsMap: { [userId: string]: number } = {};
-
-        predsSnap.forEach(pDoc => {
-          const pred = pDoc.data() as Prediction;
-          const match = matchesMap[pred.matchId];
-
-          let pts = 0;
-          if (match && match.result) {
-            pts = calculatePoints(pred.goals1, pred.goals2, match.result.goals1, match.result.goals2, match.num);
-          }
-
-          if (pred.points !== pts) {
-            batch.update(doc(db, "predictions", pred.id), { points: pts });
-          }
-
-          if (!userPointsMap[pred.userId]) {
-            userPointsMap[pred.userId] = 0;
-          }
-
-          const isFinal = match?.result ? (match.result.isFinal ?? true) : false;
-          if (isFinal) {
-            userPointsMap[pred.userId] += pts;
-          }
-        });
-
-        // Actualizar tabla de usuarios
-        const usersSnap = await getDocs(collection(db, "users"));
-        usersSnap.forEach(uDoc => {
-          const uid = uDoc.id;
-          if (uid && uid !== "undefined") {
-            const pts = userPointsMap[uid] || 0;
-            batch.set(doc(db, "users", uid), { points: pts }, { merge: true });
-          }
-        });
-
+        // Commit match/team updates first, then recompute the full cumulative
+        // chain. dbMatches already carries the updated results (mutated above).
         await batch.commit();
+        await persistCumulativeScores(dbMatches);
+
         // Bump matches_version so clients invalidate their active cache on next load
         await setDoc(doc(db, "meta", "matches_version"), { updatedAt: Date.now() }, { merge: true });
         alert(`Sincronización exitosa. Se actualizaron ${updatedMatchesCount} partidos y se recalcularon todos los puntajes.`);
@@ -2161,7 +2167,7 @@ export default function Home() {
                                   <div className="flex justify-between items-center text-xs text-slate-400 border-b border-slate-950/60 pb-3 mb-4 relative">
                                     <span className="font-bold text-emerald-500 flex items-center gap-1.5 flex-wrap">
                                       <span>{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
-                                      {match.num >= 73 && (
+                                      {!match.group && (
                                         <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
                                           x2 Puntos
                                         </span>
@@ -2386,7 +2392,7 @@ export default function Home() {
                                       if (isLive) {
                                         const liveGoals1 = match.result ? match.result.goals1 : 0;
                                         const liveGoals2 = match.result ? match.result.goals2 : 0;
-                                        const currentPoints = pred ? calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2, match.num) : 0;
+                                        const currentPoints = pred ? calculatePoints(pred.goals1, pred.goals2, liveGoals1, liveGoals2, match.group) : 0;
 
                                         return (
                                           <div className="flex items-center space-x-2">
@@ -2440,6 +2446,22 @@ export default function Home() {
                                       );
                                     })()}
                                   </div>
+
+                                  {/* Running cumulative breakdown: standing before/after this match */}
+                                  {pred && hasMatchStarted(match) && (
+                                    <div className="mt-2 flex justify-end">
+                                      <PointsBreakdown
+                                        prevPoints={pred.prevPoints}
+                                        matchPoints={
+                                          match.result
+                                            ? calculatePoints(pred.goals1, pred.goals2, match.result.goals1, match.result.goals2, match.group)
+                                            : 0
+                                        }
+                                        afterMatchPoints={pred.afterMatchPoints}
+                                        isLive={match.result == null || match.result.isFinal === false}
+                                      />
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -2781,7 +2803,7 @@ export default function Home() {
                                       <div className="flex-1">
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
-                                          {match.num >= 73 && (
+                                          {!match.group && (
                                             <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
                                               x2 Puntos
                                             </span>
@@ -3151,7 +3173,7 @@ export default function Home() {
                                         <div className="flex-1">
                                           <div className="flex items-center gap-2 flex-wrap">
                                             <span className="text-xs text-amber-500 font-semibold">{formatRoundName(match.round)} • Partido {match.num}</span>
-                                            {match.num >= 73 && (
+                                            {!match.group && (
                                               <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
                                                 x2 Puntos
                                               </span>
@@ -3774,7 +3796,7 @@ export default function Home() {
                         <div className="flex items-center gap-2 flex-wrap justify-center">
                           <span className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
                             <span>{formatRoundName(match.round)} {match.group ? `• ${match.group}` : ""}</span>
-                            {match.num >= 73 && (
+                            {!match.group && (
                               <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">
                                 x2 Puntos
                               </span>
@@ -3847,7 +3869,7 @@ export default function Home() {
                           <div className="flex items-center gap-2">
                             {pred ? (
                               (() => {
-                                const currentPoints = calculatePoints(pred.goals1, pred.goals2, liveGoals1Card, liveGoals2Card, match.num);
+                                const currentPoints = calculatePoints(pred.goals1, pred.goals2, liveGoals1Card, liveGoals2Card, match.group);
                                 return (
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs bg-slate-900 border border-slate-800 text-emerald-450 px-2 py-1 rounded-lg font-bold font-mono">
@@ -3863,6 +3885,22 @@ export default function Home() {
                               <span className="text-[10px] text-rose-500 font-bold bg-rose-500/5 px-2.5 py-1 rounded-lg border border-rose-500/10">Sin pronóstico</span>
                             )}
                           </div>
+
+                          {/* Running cumulative breakdown: standing before/after this match */}
+                          {pred && (
+                            <div className="w-full flex justify-center">
+                              <PointsBreakdown
+                                prevPoints={pred.prevPoints}
+                                matchPoints={
+                                  match.result
+                                    ? calculatePoints(pred.goals1, pred.goals2, liveGoals1Card, liveGoals2Card, match.group)
+                                    : 0
+                                }
+                                afterMatchPoints={pred.afterMatchPoints}
+                                isLive={isLiveCard}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
 
