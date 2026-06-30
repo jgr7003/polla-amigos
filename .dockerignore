@@ -1,0 +1,13 @@
+node_modules
+.next
+out
+.git
+.github
+.idea
+coverage
+*.log
+.DS_Store
+.env*
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

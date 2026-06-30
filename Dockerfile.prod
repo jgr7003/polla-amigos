@@ -1,0 +1,30 @@
+# ----------------------------------------------------------------------------
+# Modo PRODUCCIÓN: compila el export estático de Next.js y lo sirve con Nginx.
+# ----------------------------------------------------------------------------
+
+# 1) Build: genera el sitio estático en /app/out
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+# La app es estática: las variables NEXT_PUBLIC_* se "hornean" en build time.
+# Por defecto producción usa Firebase en la nube (emulador desactivado).
+ARG NEXT_PUBLIC_USE_FIREBASE_EMULATOR=false
+ENV NEXT_PUBLIC_USE_FIREBASE_EMULATOR=$NEXT_PUBLIC_USE_FIREBASE_EMULATOR
+
+RUN npm run build
+
+# 2) Runtime: Nginx sirviendo el export bajo el basePath /polla-amigos
+FROM nginx:1.27-alpine AS runner
+
+# El sitio se referencia bajo /polla-amigos (basePath en next.config.ts),
+# así que el contenido del export debe vivir en esa subruta.
+COPY --from=builder /app/out /usr/share/nginx/html/polla-amigos
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
