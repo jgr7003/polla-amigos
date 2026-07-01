@@ -1070,33 +1070,157 @@ export default function Home() {
       buildCumulativeMatches(matchesArr)
     );
 
-    const batch = writeBatch(db);
+    // Firestore caps a writeBatch at 500 operations. A full backfill rewrites
+    // hundreds of predictions plus every user, so we commit in chunks. Users are
+    // written last so that users.points always ends up reflecting the freshly
+    // computed chain total (the afterMatchPoints of each user's last final match).
+    const BATCH_LIMIT = 450;
+    let batch = writeBatch(db);
+    let opsInBatch = 0;
+    const stageWrite = async (ref: ReturnType<typeof doc>, data: Record<string, unknown>, merge: boolean) => {
+      if (merge) batch.set(ref, data, { merge: true });
+      else batch.update(ref, data);
+      opsInBatch++;
+      if (opsInBatch >= BATCH_LIMIT) {
+        await batch.commit();
+        batch = writeBatch(db);
+        opsInBatch = 0;
+      }
+    };
 
-    preds.forEach(({ id, data }) => {
+    for (const { id, data } of preds) {
       const cp = byPrediction.get(id);
-      if (!cp) return;
+      if (!cp) continue;
       const changed =
         data.points !== cp.points ||
         (data.prevPoints ?? null) !== cp.prevPoints ||
         (data.afterMatchPoints ?? null) !== cp.afterMatchPoints;
       if (changed) {
-        batch.update(doc(db, "predictions", id), {
-          points: cp.points,
-          prevPoints: cp.prevPoints,
-          afterMatchPoints: cp.afterMatchPoints,
-        });
+        await stageWrite(
+          doc(db, "predictions", id),
+          { points: cp.points, prevPoints: cp.prevPoints, afterMatchPoints: cp.afterMatchPoints },
+          false
+        );
       }
-    });
+    }
 
     const usersSnap = await getDocs(collection(db, "users"));
-    usersSnap.forEach((uDoc) => {
+    for (const uDoc of usersSnap.docs) {
       const uid = uDoc.id;
       if (uid && uid !== "undefined") {
-        batch.set(doc(db, "users", uid), { points: userTotals.get(uid) || 0 }, { merge: true });
+        await stageWrite(doc(db, "users", uid), { points: userTotals.get(uid) || 0 }, true);
       }
-    });
+    }
 
-    await batch.commit();
+    if (opsInBatch > 0) {
+      await batch.commit();
+    }
+  };
+
+  // Fast path for the common case: one or more matches are finalized AT THE END
+  // of the chronological chain. Because users.points already equals each user's
+  // last afterMatchPoints, a new final match simply advances their total by the
+  // points scored in it — no full re-read/rewrite of the whole chain needed.
+  // Only the finalized matches' predictions (and the affected users) are touched.
+  //
+  // Returns false when it's NOT a clean append (out-of-order finalize), so the
+  // caller falls back to the full persistCumulativeScores recompute. Editing an
+  // already-final result must be handled by the caller (force fallback), since
+  // that shifts the tail of the chain.
+  const tryIncrementalFinalize = async (
+    matchesArr: Match[],
+    newlyFinalMatchIds: string[]
+  ): Promise<boolean> => {
+    const ordered = buildCumulativeMatches(matchesArr);
+    const orderById = new Map(ordered.map((m) => [m.id, m.order]));
+    const byId = new Map(ordered.map((m) => [m.id, m]));
+
+    // Keep only the ids that are actually final now.
+    const finalIds = newlyFinalMatchIds.filter((id) => {
+      const m = byId.get(id);
+      return m && m.result && m.result.isFinal !== false;
+    });
+    if (finalIds.length === 0) return true; // nothing points-relevant to persist
+
+    finalIds.sort((a, b) => (orderById.get(a) ?? 0) - (orderById.get(b) ?? 0));
+
+    // Highest chronological order among matches that were ALREADY final,
+    // excluding the ones we're finalizing right now.
+    const finalIdSet = new Set(finalIds);
+    let maxExistingFinalOrder = -1;
+    for (const m of ordered) {
+      if (finalIdSet.has(m.id)) continue;
+      if (m.result && m.result.isFinal !== false && m.order > maxExistingFinalOrder) {
+        maxExistingFinalOrder = m.order;
+      }
+    }
+
+    // Clean append only if every newly-final match sits after all existing finals.
+    if ((orderById.get(finalIds[0]) ?? 0) <= maxExistingFinalOrder) return false;
+
+    // Current user totals (== last afterMatchPoints) are the running start point.
+    const usersSnap = await getDocs(collection(db, "users"));
+    const runningByUser = new Map<string, number>();
+    usersSnap.forEach((u) => runningByUser.set(u.id, (u.data().points as number) || 0));
+
+    // Predictions for the finalized matches only ('in' supports up to 30 ids).
+    type PredRow = { id: string; userId: string; matchId: string; goals1: number; goals2: number };
+    const byUser = new Map<string, PredRow[]>();
+    for (let i = 0; i < finalIds.length; i += 30) {
+      const chunk = finalIds.slice(i, i + 30);
+      const snap = await getDocs(query(collection(db, "predictions"), where("matchId", "in", chunk)));
+      snap.forEach((d) => {
+        const data = d.data() as Prediction;
+        const row: PredRow = {
+          id: d.id,
+          userId: data.userId,
+          matchId: data.matchId,
+          goals1: data.goals1,
+          goals2: data.goals2,
+        };
+        if (!byUser.has(row.userId)) byUser.set(row.userId, []);
+        byUser.get(row.userId)!.push(row);
+      });
+    }
+
+    const BATCH_LIMIT = 450;
+    let batch = writeBatch(db);
+    let ops = 0;
+    const flush = async () => {
+      if (ops >= BATCH_LIMIT) {
+        await batch.commit();
+        batch = writeBatch(db);
+        ops = 0;
+      }
+    };
+
+    const touchedUsers = new Set<string>();
+    for (const [userId, preds] of byUser) {
+      preds.sort((a, b) => (orderById.get(a.matchId) ?? 0) - (orderById.get(b.matchId) ?? 0));
+      let running = runningByUser.get(userId) ?? 0;
+      for (const p of preds) {
+        const m = byId.get(p.matchId)!;
+        const pts = calculatePoints(p.goals1, p.goals2, m.result!.goals1, m.result!.goals2, m.group);
+        const prevPoints = running;
+        running = running + pts;
+        batch.update(doc(db, "predictions", p.id), { points: pts, prevPoints, afterMatchPoints: running });
+        ops++;
+        await flush();
+      }
+      runningByUser.set(userId, running);
+      touchedUsers.add(userId);
+    }
+
+    // Users who scored nothing new (no prediction for the finalized matches) keep
+    // their total untouched — no record is created for them (see design B).
+    for (const userId of touchedUsers) {
+      batch.set(doc(db, "users", userId), { points: runningByUser.get(userId) || 0 }, { merge: true });
+      ops++;
+      await flush();
+    }
+
+    if (ops > 0) await batch.commit();
+    return true;
   };
 
   // Admin: Set Match Result and Update Scores
@@ -1110,28 +1234,39 @@ export default function Home() {
 
     setAdminSaving(prev => ({ ...prev, [matchId]: true }));
 
+    // Was this match already final before we touched it? Editing an existing
+    // final result shifts the tail of the chain, so it forces the full recompute.
+    const isFinalNow = draft.isFinal ?? true;
+    const prevMatch = matches.find((m) => m.id === matchId);
+    const wasAlreadyFinal = !!(prevMatch?.result && prevMatch.result.isFinal !== false);
+
     try {
       // 1. Update Match Doc
       const matchRef = doc(db, "matches", matchId);
       await setDoc(matchRef, {
-        result: { goals1: rg1, goals2: rg2, isFinal: draft.isFinal ?? true }
+        result: { goals1: rg1, goals2: rg2, isFinal: isFinalNow }
       }, { merge: true });
 
-      // 2. Recompute the whole cumulative chain. Editing one result can shift
-      // the prevPoints/afterMatchPoints of every later match for every user, so
-      // we walk all predictions in order rather than touching just this match.
-      // Read matches fresh and overlay the result we just wrote (in case the
-      // fresh read raced the write).
+      // 2. Update the cumulative chain. Read matches fresh and overlay the result
+      // we just wrote (in case the fresh read raced the write).
       const matchesSnap = await getDocs(collection(db, "matches"));
       const matchesArr: Match[] = matchesSnap.docs.map((d) => {
         const m = { ...(d.data() as Match), id: d.id };
         if (d.id === matchId) {
-          m.result = { goals1: rg1, goals2: rg2, isFinal: draft.isFinal ?? true };
+          m.result = { goals1: rg1, goals2: rg2, isFinal: isFinalNow };
         }
         return m;
       });
 
-      await persistCumulativeScores(matchesArr);
+      // Fast path when finalizing a new match at the end of the chain; otherwise
+      // (edit of an existing final, or out-of-order finalize) full recompute.
+      let handled = false;
+      if (isFinalNow && !wasAlreadyFinal) {
+        handled = await tryIncrementalFinalize(matchesArr, [matchId]);
+      }
+      if (!handled) {
+        await persistCumulativeScores(matchesArr);
+      }
 
       // Bump matches_version so clients invalidate their active cache on next load
       await setDoc(doc(db, "meta", "matches_version"), { updatedAt: Date.now() }, { merge: true });
@@ -1261,10 +1396,15 @@ export default function Home() {
 
       let updatedMatchesCount = 0;
       const batch = writeBatch(db);
+      // Track which matches became final in this sync (for the incremental fast
+      // path) and whether any already-final result was edited (forces fallback).
+      const newlyFinalIds: string[] = [];
+      let hasFinalEdit = false;
 
       for (const dbMatch of dbMatches) {
         const dbMatchIdNum = parseInt(dbMatch.id, 10);
         let fixture = null;
+        const wasFinalBefore = !!(dbMatch.result && dbMatch.result.isFinal !== false);
 
         if (dbMatchIdNum >= 73) {
           fixture = apiFixtures.find((f: any) => parseInt(f.id, 10) === dbMatchIdNum);
@@ -1338,6 +1478,12 @@ export default function Home() {
           batch.update(doc(db, "matches", dbMatch.id), updateData);
           updatedMatchesCount++;
 
+          // Classify the result change for the persistence strategy below.
+          if (resultChanged && newResult && newResult.isFinal) {
+            if (wasFinalBefore) hasFinalEdit = true; // score correction on a final match
+            else newlyFinalIds.push(dbMatch.id); // fresh finalization
+          }
+
           // Actualizar temporalmente para el cálculo de abajo
           dbMatch.result = newResult;
           dbMatch.team1 = updatedTeam1;
@@ -1346,10 +1492,19 @@ export default function Home() {
       }
 
       if (updatedMatchesCount > 0) {
-        // Commit match/team updates first, then recompute the full cumulative
-        // chain. dbMatches already carries the updated results (mutated above).
+        // Commit match/team updates first, then update the cumulative chain.
+        // dbMatches already carries the updated results (mutated above).
         await batch.commit();
-        await persistCumulativeScores(dbMatches);
+
+        // Fast path when matches were finalized at the end of the chain (and no
+        // already-final result was edited); otherwise full recompute.
+        let handled = false;
+        if (!hasFinalEdit) {
+          handled = await tryIncrementalFinalize(dbMatches, newlyFinalIds);
+        }
+        if (!handled) {
+          await persistCumulativeScores(dbMatches);
+        }
 
         // Bump matches_version so clients invalidate their active cache on next load
         await setDoc(doc(db, "meta", "matches_version"), { updatedAt: Date.now() }, { merge: true });
