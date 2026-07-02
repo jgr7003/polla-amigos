@@ -298,6 +298,7 @@ export default function Home() {
   const [adminUserDrafts, setAdminUserDrafts] = useState<{ [matchId: string]: { goals1: string; goals2: string } }>({});
   const [adminSavingUserPreds, setAdminSavingUserPreds] = useState<{ [matchId: string]: boolean }>({});
   const [adminRecalculating, setAdminRecalculating] = useState(false);
+  const [recalculatingUserId, setRecalculatingUserId] = useState<string | null>(null);
   const [adminSyncing, setAdminSyncing] = useState(false);
   const [hidePastMatchesAdmin, setHidePastMatchesAdmin] = useState(true);
   const [editingTeamsMatchId, setEditingTeamsMatchId] = useState<string | null>(null);
@@ -1300,6 +1301,105 @@ export default function Home() {
       alert("Error al recalcular todos los puntajes en Firestore.");
     } finally {
       setAdminRecalculating(false);
+    }
+  };
+
+  // Admin: recompute the full cumulative chain for a SINGLE user. Walks only that
+  // user's predictions in chronological order, so it fixes any drift between the
+  // running breakdown (prevPoints / afterMatchPoints) and users.points — the
+  // discrepancy the incremental fast-path can leave when matches finalize out of
+  // order — without re-reading/rewriting every other participant's chain.
+  const recalculateUserScores = async (target: UserProfile) => {
+    if (!profile?.isAdmin || recalculatingUserId) return;
+    const confirmRecalc = window.confirm(
+      `¿Recalcular los puntos de ${target.displayName}? Se recorrerán sus predicciones en orden cronológico para corregir cualquier descuadre en su acumulado.`
+    );
+    if (!confirmRecalc) return;
+
+    setRecalculatingUserId(target.uid);
+    try {
+      // Fresh matches so the chronological ordering and results are up to date.
+      const matchesSnap = await getDocs(collection(db, "matches"));
+      const matchesArr: Match[] = matchesSnap.docs.map((d) => ({
+        ...(d.data() as Match),
+        id: d.id,
+      }));
+
+      // Only this user's predictions (≤ one per match, well under any batch cap).
+      const predsSnap = await getDocs(
+        query(collection(db, "predictions"), where("userId", "==", target.uid))
+      );
+      const preds: { id: string; data: Prediction }[] = [];
+      const predInputs = predsSnap.docs.map((d) => {
+        const data = d.data() as Prediction;
+        preds.push({ id: d.id, data });
+        return {
+          id: d.id,
+          userId: data.userId,
+          matchId: data.matchId,
+          goals1: data.goals1,
+          goals2: data.goals2,
+        };
+      });
+
+      const { byPrediction, userTotals } = computeCumulativePoints(
+        predInputs,
+        buildCumulativeMatches(matchesArr)
+      );
+
+      const batch = writeBatch(db);
+      let changedCount = 0;
+      for (const { id, data } of preds) {
+        const cp = byPrediction.get(id);
+        if (!cp) continue;
+        const changed =
+          data.points !== cp.points ||
+          (data.prevPoints ?? null) !== cp.prevPoints ||
+          (data.afterMatchPoints ?? null) !== cp.afterMatchPoints;
+        if (changed) {
+          batch.update(doc(db, "predictions", id), {
+            points: cp.points,
+            prevPoints: cp.prevPoints,
+            afterMatchPoints: cp.afterMatchPoints,
+          });
+          changedCount++;
+        }
+      }
+
+      const newTotal = userTotals.get(target.uid) || 0;
+      batch.set(doc(db, "users", target.uid), { points: newTotal }, { merge: true });
+      await batch.commit();
+
+      // The modal's prediction list is a one-off read (not a live subscription),
+      // so refresh it — and the header total — in place. The leaderboard updates
+      // itself through its users onSnapshot.
+      const cpByMatchId = new Map(
+        preds.map(({ id, data }) => [data.matchId, byPrediction.get(id)])
+      );
+      setViewingUserPredictions((prev) =>
+        prev.map((p) => {
+          const cp = cpByMatchId.get(p.matchId);
+          if (!cp) return p;
+          return {
+            ...p,
+            points: cp.points,
+            prevPoints: cp.prevPoints,
+            afterMatchPoints: cp.afterMatchPoints,
+          };
+        })
+      );
+      setViewingUser((prev) =>
+        prev && prev.uid === target.uid ? { ...prev, points: newTotal } : prev
+      );
+
+      alert(
+        `Puntos de ${target.displayName} recalculados. ${changedCount} predicción(es) actualizada(s). Total: ${newTotal} pts.`
+      );
+    } catch (err) {
+      console.error("Error recalculating user scores:", err);
+      alert("Error al recalcular los puntos de este usuario.");
+    } finally {
+      setRecalculatingUserId(null);
     }
   };
 
@@ -4074,7 +4174,19 @@ export default function Home() {
             </div>
 
             {/* Modal Footer */}
-            <div className="pt-2 border-t border-slate-800 flex justify-end shrink-0">
+            <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
+              {profile?.isAdmin ? (
+                <button
+                  onClick={() => recalculateUserScores(viewingUser)}
+                  disabled={recalculatingUserId === viewingUser.uid}
+                  title="Recorre las predicciones de este usuario en orden y corrige su acumulado"
+                  className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold rounded-xl text-xs transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {recalculatingUserId === viewingUser.uid ? "Recalculando..." : "🔄 Recalcular este usuario"}
+                </button>
+              ) : (
+                <span />
+              )}
               <button
                 onClick={() => {
                   setViewingUser(null);
